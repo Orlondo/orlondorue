@@ -1,0 +1,104 @@
+.content {
+  width: 726px;
+  height: 88px;
+  border: 1px solid rgba(0, 0, 0, 1);
+}
+
+.container {
+  width: 711px;
+  height: 88px;
+  padding: 0 5px;
+  position: absolute;
+  clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%);
+  -webkit-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%);
+  overflow: hidden;
+}
+
+img {
+  position: absolute;
+}
+
+.revealSlash {
+  animation: revealSlash 2s cubic-bezier(0.075, 0.820, 0.165, 1.000) forwards;
+}
+
+.revealContent {
+  animation: revealContent 1s forwards;
+}
+
+.revealBackgroundImage {
+  animation: revealBackgroundImage 5s forwards;
+}
+
+.background {
+  opacity: 0;
+  transform: scale(1.2);
+}
+
+.revealTire {
+  animation: revealTire 5s forwards;
+}
+
+.tire {
+  opacity: 0;
+  transform: scale(1.2);  
+  transform-origin: 300px 88px;
+}
+
+.reveal {
+  animation: reveal 0.5s forwards;
+}
+
+.lockup, .gradient {
+  opacity: 0;
+}
+
+.slash {
+  width: 726px;
+  height: 88px;
+  position: absolute;
+  clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);
+  -webkit-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);
+  background-color: #f2630d;
+  transform: translateY(0px);
+  opacity: 0;
+}
+
+@keyframes revealSlash {
+  0% { transform: translateY(-150px); opacity: 1; }
+  30% { transform: translateY(0px) }
+
+  60% { clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%); } 
+  100% { clip-path: polygon(0% 6%, 100% 6%, 100% 94%, 0% 94%); opacity: 1; }
+
+  0% { -webkit-transform: translateY(-150px); opacity: 1; }
+  30% { -webkit-transform: translateY(0px) }
+
+  60% { -webkit-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%); } 
+  100% { -webkit-clip-path: polygon(0% 6%, 100% 6%, 100% 94%, 0% 94%); opacity: 1; }
+}
+
+@keyframes revealContent {
+  0% { clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
+  100% { clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
+
+  0% { -webkit-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
+  100% { -webkit-clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
+}
+
+@keyframes revealBackgroundImage {
+  0% { opacity: 0; transform: scale(1.2); }
+  1% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes revealTire {
+  0% { opacity: 0; transform: scale(1.2); }
+  1% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
