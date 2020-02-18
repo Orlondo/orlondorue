@@ -35,14 +35,18 @@ img {
   transform: scale(1.2);
 }
 
-.revealTire {
+.revealTire, .revealDust {
   animation: revealTire 5s forwards;
 }
 
-.tire {
+.tire, .dust {
   opacity: 0;
   transform: scale(1.2);  
   transform-origin: 250px 260px;
+}
+
+.dust {
+  mix-blend-mode: lighten;
 }
 
 .reveal {
@@ -65,15 +69,15 @@ img {
 }
 
 @keyframes revealSlash {
-  0% { transform: translateY(-150px); opacity: 1; }
-  30% { transform: translateY(0px) }
-
+  0% { opacity: 0; }
+  25% { opacity: 0; }
+  50% { opacity: 1; }
   60% { clip-path: polygon(0% 47%, 100% 47%, 100% 53%, 0% 53%); } 
   100% { clip-path: polygon(0% 2%, 100% 2%, 100% 98%, 0% 98%); opacity: 1; }
 
-  0% { -webkit-transform: translateY(-150px); opacity: 1; }
-  30% { -webkit-transform: translateY(0px) }
-
+  0% { opacity: 0; }
+  25% { opacity: 0; }
+  50% { opacity: 1; }
   60% { -webkit-clip-path: polygon(0% 47%, 100% 47%, 100% 53%, 0% 53%); } 
   100% { -webkit-clip-path: polygon(0% 2%, 100% 2%, 100% 98%, 0% 98%); opacity: 1; }
 }

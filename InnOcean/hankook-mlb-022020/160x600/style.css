@@ -69,15 +69,15 @@ img {
 }
 
 @keyframes revealSlash {
-  0% { transform: translateY(-150px); opacity: 1; }
-  30% { transform: translateY(0px) }
-
+  0% { opacity: 0; }
+  25% { opacity: 0; }
+  50% { opacity: 1; }
   60% { clip-path: polygon(0% 48%, 100% 48%, 100% 52%, 0% 52%); } 
   100% { clip-path: polygon(0% 1%, 100% 1%, 100% 99%, 0% 99%); opacity: 1; }
 
-  0% { -webkit-transform: translateY(-150px); opacity: 1; }
-  30% { -webkit-transform: translateY(0px) }
-
+  0% { opacity: 0; }
+  25% { opacity: 0; }
+  50% { opacity: 1; }
   60% { -webkit-clip-path: polygon(0% 48%, 100% 48%, 100% 52%, 0% 52%); } 
   100% { -webkit-clip-path: polygon(0% 1%, 100% 1%, 100% 99%, 0% 99%); opacity: 1; }
 }
