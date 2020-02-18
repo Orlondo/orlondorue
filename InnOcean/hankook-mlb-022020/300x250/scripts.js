@@ -25,11 +25,11 @@ io.animations = (function() {
       tire.classList.add('revealTire');
       dust.classList.add('revealDust');
       container.classList.add('revealContent');
-    }, 3000);
+    }, 2000);
     endFrame();
   }
 
   function endFrame() {
-    setTimeout(function () { lockup.classList.add('reveal') }, 6000);
+    setTimeout(function () { lockup.classList.add('reveal') }, 5000);
   }
 })();

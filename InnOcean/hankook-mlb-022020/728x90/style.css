@@ -19,7 +19,7 @@ img {
 }
 
 .revealSlash {
-  animation: revealSlash 2s cubic-bezier(0.075, 0.820, 0.165, 1.000) forwards;
+  animation: revealSlash 1s cubic-bezier(0.075, 0.820, 0.165, 1.000) forwards;
 }
 
 .revealContent {
@@ -59,6 +59,7 @@ img {
   position: absolute;
   clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);
   -webkit-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);
+  -ms-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);
   background-color: #f2630d;
   transform: translateY(0px);
   opacity: 0;
@@ -66,15 +67,11 @@ img {
 
 @keyframes revealSlash {
   0% { opacity: 0; }
-  25% { opacity: 0; }
-  50% { opacity: 1; }
-  60% { clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%); } 
+  5% { opacity: 1; clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);}
   100% { clip-path: polygon(0% 6%, 100% 6%, 100% 94%, 0% 94%); opacity: 1; }
 
   0% { opacity: 0; }
-  25% { opacity: 0; }
-  50% { opacity: 1; }
-  60% { -webkit-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%); } 
+  5% { opacity: 1; -webkit-clip-path: polygon(0% 40%, 100% 40%, 100% 60%, 0% 60%);}
   100% { -webkit-clip-path: polygon(0% 6%, 100% 6%, 100% 94%, 0% 94%); opacity: 1; }
 }
 
@@ -84,6 +81,9 @@ img {
 
   0% { -webkit-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
   100% { -webkit-clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
+
+  0% { -ms-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
+  100% { -ms-clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
 }
 
 @keyframes revealBackgroundImage {
