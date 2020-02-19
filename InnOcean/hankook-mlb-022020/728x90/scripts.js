@@ -23,11 +23,11 @@ io.animations = (function() {
       gradient.classList.add('reveal')
       tire.classList.add('revealTire');
       container.classList.add('revealContent');
-    }, 2000);
+    }, 1000);
     endFrame();
   }
 
   function endFrame() {
-    setTimeout(function () { lockup.classList.add('reveal') }, 5000);
+    setTimeout(function () { lockup.classList.add('reveal') }, 3000);
   }
 })();
