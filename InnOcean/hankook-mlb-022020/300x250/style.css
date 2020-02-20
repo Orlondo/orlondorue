@@ -68,6 +68,22 @@ img {
   opacity: 0;
 }
 
+.backup {
+  background-image: url('backup.png');
+  background-repeat: no-repeat;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.show {
+  display: block;
+}
+
+.hide {
+  display: none;
+}
+
 @keyframes revealSlash {
   0% { opacity: 0; }
   5% { opacity: 1; clip-path: polygon(0% 47%, 100% 47%, 100% 53%, 0% 53%); }
