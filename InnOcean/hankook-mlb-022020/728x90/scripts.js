@@ -9,10 +9,12 @@ io.animations = (function() {
   const tire = document.querySelector('.tire');
   const gradient = document.querySelector('.gradient');
   const lockup = document.querySelector('.lockup');
+  const backup = document.querySelector('.backup');
 
   onStart();
 
   function onStart() {
+    checkVersion();
     setTimeout(function () { slash.classList.add('revealSlash') }, 500);
     frame1();
   }
@@ -29,5 +31,21 @@ io.animations = (function() {
 
   function endFrame() {
     setTimeout(function () { lockup.classList.add('reveal') }, 3000);
+  }
+
+  function checkVersion() {
+    var ua = window.navigator.userAgent;
+    var msie = ua.indexOf("MSIE ");
+
+    if (msie > 0 || !!navigator.userAgent.match(/Trident.*rv\:11\./))
+    {
+      container.classList.add('hide');
+      backup.classList.remove('hide');
+    }
+
+    if (navigator.appVersion.indexOf('Edge') > -1){
+      container.classList.add('hide');
+      backup.classList.remove('hide');
+    }   
   }
 })();
