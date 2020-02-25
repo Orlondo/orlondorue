@@ -7,9 +7,9 @@ io.animations = (function() {
   var slash = document.querySelector('.slash');
   const image = document.querySelector('.background');
   const tire = document.querySelector('.tire');
-  const gradient = document.querySelector('.gradient');
   const lockup = document.querySelector('.lockup');
   const backup = document.querySelector('.backup');
+  const dust = document.querySelector('.dust');
 
   onStart();
 
@@ -22,8 +22,8 @@ io.animations = (function() {
   function frame1() {
     setTimeout(function () { 
       image.classList.add('revealBackgroundImage');
-      gradient.classList.add('reveal')
       tire.classList.add('revealTire');
+      dust.classList.add('revealTire');
       container.classList.add('revealContent');
     }, 1000);
     endFrame();

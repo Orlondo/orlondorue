@@ -33,6 +33,7 @@ img {
 .background {
   opacity: 0;
   transform: scale(1.2);
+  left: -5px;
 }
 
 .revealTire {
@@ -43,14 +44,24 @@ img {
   opacity: 0;
   transform: scale(1.2);  
   transform-origin: 300px 88px;
+  left: -5px;
 }
 
 .reveal {
   animation: reveal 0.5s forwards;
 }
 
-.lockup, .gradient {
+.lockup {
   opacity: 0;
+  left: -5px;
+}
+
+.dust {
+  mix-blend-mode: screen;
+  opacity: 0;
+  transform: scale(1.2);  
+  transform-origin: 300px 88px;
+  left: -5px;
 }
 
 .slash {
@@ -93,13 +104,10 @@ img {
 
 @keyframes revealContent {
   0% { clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
-  100% { clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
+  100% { clip-path: polygon(0% 0%, 63% 0%, 59% 100%, -20% 100%); }
 
   0% { -webkit-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
-  100% { -webkit-clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
-
-  0% { -ms-clip-path: polygon(52.5% 0%, 53% 0%, 49% 100%, 48.5% 100%); } 
-  100% { -ms-clip-path: polygon(0% 0%, 53% 0%, 49% 100%, -20% 100%); }
+  100% { -webkit-clip-path: polygon(0% 0%, 63% 0%, 59% 100%, -20% 100%); }
 }
 
 @keyframes revealBackgroundImage {

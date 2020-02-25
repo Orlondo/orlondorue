@@ -44,16 +44,22 @@ img {
 .background {
   opacity: 0;
   transform: scale(1.2);
+  left: -5px;
 }
 
 .revealTire {
   animation: revealTire 5s forwards;
 }
 
-.tire {
+.tire, .dust {
   opacity: 0;
   transform: scale(1.2);  
   transform-origin: 149px 450px;
+  left: -5px;
+}
+
+.dust {
+  mix-blend-mode: screen;
 }
 
 .reveal {
@@ -66,6 +72,10 @@ img {
 
 .lockup, .gradient {
   opacity: 0;
+}
+
+.gradient {
+  left: -5px;
 }
 
 .backup {

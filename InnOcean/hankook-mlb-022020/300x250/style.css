@@ -33,6 +33,7 @@ img {
 .background {
   opacity: 0;
   transform: scale(1.2);
+  left: -6px;
 }
 
 .revealTire, .revealDust {
@@ -43,10 +44,12 @@ img {
   opacity: 0;
   transform: scale(1.2);  
   transform-origin: 250px 260px;
+  left: -6px;
 }
 
 .dust {
-  mix-blend-mode: lighten;
+  mix-blend-mode: screen;
+  left: -6px;
 }
 
 .reveal {
@@ -55,6 +58,7 @@ img {
 
 .lockup, .gradient {
   opacity: 0;
+  left: -6px;
 }
 
 .slash {
