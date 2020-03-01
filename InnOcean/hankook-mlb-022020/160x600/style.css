@@ -70,12 +70,8 @@ img {
   left: -5px;
 }
 
-.lockup, .gradient {
+.lockup {
   opacity: 0;
-}
-
-.gradient {
-  left: -5px;
 }
 
 .backup {
