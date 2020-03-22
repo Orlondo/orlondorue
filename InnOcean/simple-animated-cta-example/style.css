@@ -1,0 +1,121 @@
+body
+{
+	margin: 0px;
+	padding: 0px;	
+}
+
+#container
+{
+	position: relative;
+	width: 300px;
+	height: 250px;
+	overflow: hidden;
+	margin: 0px;
+	padding: 0px;
+}
+
+#border {
+	position: absolute;
+	width: 298px;
+	height: 248px;
+	border: solid 1px #000;
+}
+
+#container > img,
+#cta,
+#logo,
+#cta-hover,
+#hotSpot
+{
+	position: absolute;
+}
+
+#ctaCont
+{
+	position: absolute;
+	left: 10px;
+	top: 203px;
+	width: 129px;
+	height: 29px;
+	overflow: hidden;
+	cursor: pointer;
+}
+
+#cta
+{
+	position: absolute;
+   	transition: opacity 0.25s ease-in;
+   	-moz-transition: opacity 0.25s ease-in;
+   	-webkit-transition: opacity 0.25s ease-in;
+}
+
+.ctaHover
+{
+	opacity: 0;
+}
+
+#hotSpot
+{
+	width: 300px;
+	height: 250px;
+	background-color: teal;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.txt1, .txt2, .txt3 {
+	opacity: 0;
+   	transition: opacity 0.25s ease-in;
+   	-moz-transition: opacity 0.25s ease-in;
+   	-webkit-transition: opacity 0.25s ease-in;
+}
+
+.images {
+   	transition: transform 5s ease-in-out, opacity 0.25s ease-in;
+   	-moz-transition: transform 5s ease-in-out, opacity 0.25s ease-in;
+   	-webkit-transition: transform 5s ease-in-out, opacity 0.25s ease-in;
+}
+
+.image1 {
+	opacity: 1;
+
+   	transform: scale(1.12);
+   	-ms-transform: scale(1.12); /* IE 9 */
+    -webkit-transform: scale(1.12); /* Safari */
+}
+
+.image2 {
+	transform-origin: 70% 0%;
+
+   	transform: scale(1.12);
+   	-ms-transform: scale(1.12); /* IE 9 */
+    -webkit-transform: scale(1.12); /* Safari */
+}
+
+.animate-opacity {
+	opacity: 1;
+}
+
+.fadeout-image {
+	opacity: 0
+}
+
+.zoom-out {
+   	transform: scale(1);
+   	-ms-transform: scale(1); /* IE 9 */
+    -webkit-transform: scale(1); /* Safari */
+}
+
+.zoom-in {
+   	transform: scale(1.12);
+   	-ms-transform: scale(1.12); /* IE 9 */
+    -webkit-transform: scale(1.12); /* Safari */
+}
+
+
+
+
+
+
+
+
