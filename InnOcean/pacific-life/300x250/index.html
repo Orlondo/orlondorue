@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]>      <html class="no-js lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]>         <html class="no-js lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]>         <html class="no-js lt-ie9"> <![endif]-->
+<!--[if gt IE 8]><!-->
+<html class="no-js">
+  <!--<![endif]-->
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title></title>
+    <meta name="description" content="" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <!--[if lt IE 7]>
+      <p class="browsehappy">
+        You are using an <strong>outdated</strong> browser. Please
+        <a href="#">upgrade your browser</a> to improve your experience.
+      </p>
+    <![endif]-->
+    <section class="container">
+      <!-- <img src="blue-main.png" class="clip-circle" /> -->
+
+      <!-- <div class="mask">
+        <div class="watercolor"></div>
+      </div> -->
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        xmlns:xlink="http://www.w3.org/1999/xlink"
+        viewBox="0 0 300 250"
+      >
+        <defs>
+          <filter id="filter">
+            <feGaussianBlur stdDeviation="5" />
+          </filter>
+          <mask id="mask">
+            <!-- <ellipse
+              cx="50%"
+              cy="50%"
+              rx="100%"
+              ry="100%"
+              fill="white"
+              filter="url(#filter)"
+            >
+              <animate
+                attributeName="rx"
+                values="5%;100%"
+                dur="5s"
+                repeatCount="0"
+              />
+              <animate
+                attributeName="ry"
+                values="5%;100%"
+                dur="5s"
+                repeatCount="0"
+              />
+            </ellipse> -->
+
+            <polygon
+              cx="50%"
+              cy="50%"
+              points="0 0 72.5 0 157.33 0 244.4 0 300 0 300 78.03 300 135.12 233.24 127.59 196.4 105.82 164.75 111.1 156.5 118.38 121.05 121.45 75.56 140.98 47.1 166.66 16.4 168.89 0 166.94 0 71.77 0 0"
+              style="fill: orange;"
+              filter="url(#filter)"
+              width="300"
+            >
+              <animate
+                id="skySpread"
+                attributeName="points"
+                from="132.5 91.87 138.08 87.4 145.97 83.68 153.15 84.05 160.96 86.29 168.77 90.75 175.47 96.61 177.96 102.84 174.36 108.61 164.75 111.1 155.66 115.45 150 120.33 141.98 115.87 129.7 113.64 123.56 108.61 121.6 101.91 124.68 96.33 132.5 91.87"
+                to="38.17 65.64 59.66 42.75 138.91 20.15 207.56 26.01 255.01 40.8 270.91 63.96 244.96 98.56 216.5 99.96 196.4 105.82 164.75 111.1 156.5 118.38 138.63 121.73 122.45 125 88.68 130.66 62.73 123.68 43.75 110.01 30.64 86.56 38.17 65.64"
+                dur="2.5s"
+                repeatCount="0"
+              />
+              <animate
+                id="skySpread2"
+                begin="skySpread.end"
+                attributeName="points"
+                from="38.17 65.64 59.66 42.75 138.91 20.15 207.56 26.01 255.01 40.8 270.91 63.96 244.96 98.56 216.5 99.96 196.4 105.82 164.75 111.1 156.5 118.38 138.63 121.73 122.45 125 88.68 130.66 62.73 123.68 43.75 110.01 30.64 86.56 38.17 65.64"
+                to="0 0 72.5 0 157.33 0 244.4 0 300 0 300 78.03 300 135.12 233.24 127.59 196.4 105.82 164.75 111.1 156.5 118.38 121.05 121.45 75.56 140.98 47.1 166.66 16.4 168.89 0 166.94 0 71.77 0 0"
+                dur="2.5s"
+                repeatCount="0"
+              />
+            </polygon>
+          </mask>
+        </defs>
+
+        <image
+          href="blue-main.png"
+          width="300"
+          height="250"
+          class="grow"
+        ></image>
+        <image
+          href="grass.png"
+          width="300"
+          height="250"
+          class="grassgrow"
+        ></image>
+      </svg>
+    </section>
+
+    <script src="" async defer></script>
+  </body>
+</html>

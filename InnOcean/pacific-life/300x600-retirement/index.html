@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <img class="logo" src="./logo.png"/>
+      <img class="copy" src="./copy.png"/>
+      <img class="copy2" src="./copy2.png"/>
+      <img class="cta" src="./cta.png"/>
+      <svg viewBox="0 0 298 598">
+        <defs>
+          <filter id="filter">
+            <feGaussianBlur stdDeviation="10" />
+          </filter>
+          <mask id="mask">
+            <path id="mask-rectangle" d="M-10 -10 L310 -10 L310 610 L-10 610 Z" fill="#ffffff" filter="url(#filter)">
+              <animate
+                id="skySpread"
+                attributeName="d"
+                begin="2"
+                from="M-10 -10 L310 -10 L310 610 L-10 610 Z"
+                to="M298 0 L298 0 L298 610 L298 610 Z"
+                dur="1.5s"
+                repeatCount="0"
+                fill="freeze"
+              ></animate>
+            </path>
+          </mask>          
+        </defs>
+        <image 
+          href="retirement-300x600.jpg"
+          class="saturated"
+        />
+        <image           
+          href="retirement-300x600-desaturated.jpg"
+          class="desaturated"
+        />
+      </svg>
+    </div>
+    <div class="backup hide"></div>
+    <script src="./main.js"></script>
+  </body>
+</html>
