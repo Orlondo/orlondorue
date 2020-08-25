@@ -6,13 +6,11 @@
   var copy = document.querySelector('.copy');
   var cta = document.querySelector('.cta');
   var logo = document.querySelector('.logo');
-  var golfer = document.querySelector('.golfer');
 
   var endFrameTime = 4000;
 
   io.showCopy = function () {
     copy.classList.add('fadeIn');
-    golfer.classList.add('fadeIn');
   };
 
   io.showCta = function () {
