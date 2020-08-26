@@ -40,7 +40,7 @@
   };
 
   io.checkBrowser();
-  setTimeout(io.showCopy, 1500);
+  setTimeout(io.showCopy, 3000);
   setTimeout(io.showLogo, endFrameTime);
   setTimeout(io.showCta, endFrameTime);
 })();
