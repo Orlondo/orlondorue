@@ -32,7 +32,7 @@ img {
 }
 
 .cta {
-  bottom: 20px;
+  bottom: 10px;
   left: 10px;
   opacity: 0;
 }
@@ -49,9 +49,9 @@ img {
   opacity: 1;
 }
 
-.w {
-  mask: url(#wMask);
-  -webkit-mask: url(#wMask);
+.whale {
+  mask: url(#whaleMask);
+  -webkit-mask: url(#whaleMask);
 }
 
 @-webkit-keyframes fadeIn {
