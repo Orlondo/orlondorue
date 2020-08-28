@@ -4,15 +4,19 @@
   var backup = document.querySelector('.backup');
   var container = document.querySelector('.container');
   var copy = document.querySelector('.copy');
+  var copy2 = document.querySelector('.copy2');
   var cta = document.querySelector('.cta');
   var logo = document.querySelector('.logo');
-  var golfer = document.querySelector('.golfer');
 
   var endFrameTime = 4000;
 
   io.showCopy = function () {
     copy.classList.add('fadeIn');
-    golfer.classList.add('fadeIn');
+  };
+
+  io.showCopy2 = function () {
+    console.log(copy2);
+    copy2.classList.add('fadeIn');
   };
 
   io.showCta = function () {
@@ -40,7 +44,8 @@
   };
 
   io.checkBrowser();
-  setTimeout(io.showCopy, 1500);
+  setTimeout(io.showCopy, 3000);
+  setTimeout(io.showCopy2, endFrameTime);
   setTimeout(io.showLogo, endFrameTime);
   setTimeout(io.showCta, endFrameTime);
 })();
