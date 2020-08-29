@@ -1,0 +1,28 @@
+body {
+  width: 300px;
+  height: 50px;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+.container {
+  position: absolute;
+  width: 298px;
+  height: 48px;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+}
+
+img {
+  position: absolute;
+}
+
+.show {
+  opacity: 1;
+}
+
+.hide {
+  display: none;
+}
