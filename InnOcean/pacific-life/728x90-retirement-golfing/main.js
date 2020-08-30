@@ -22,7 +22,6 @@
   };
 
   io.checkBrowser = function () {
-    console.log('browser check');
     var ua = window.navigator.userAgent;
     var msie = ua.indexOf('MSIE ');
 
