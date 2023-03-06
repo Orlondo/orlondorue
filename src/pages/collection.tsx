@@ -22,8 +22,6 @@ export default () => {
 
   const { data, isLoading, error } = useCharacter()
 
-  if (isLoading) return <div>Loading...</div>
-
   return (
     <Box>
       <Table>

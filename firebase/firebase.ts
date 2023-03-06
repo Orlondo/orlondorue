@@ -1,5 +1,4 @@
-import firebase, { initializeApp } from 'firebase/app'
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check'
+import { initializeApp, getApps } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
 
 const clientCredentials = {
@@ -24,16 +23,22 @@ const firebaseConfig = {
 }
 const app = initializeApp(clientCredentials)
 
-const appCheck = initializeAppCheck(app, {
-  provider: new ReCaptchaV3Provider('6LctFtUkAAAAAGgZQ58fQcDOHB4Orf7BHMi5z0Al'),
-  isTokenAutoRefreshEnabled: true,
-})
+if (typeof window !== 'undefined') {
+  import('firebase/app-check').then(firebaseAppCheck => {
+    firebaseAppCheck.initializeAppCheck(app, {
+      provider: new firebaseAppCheck.ReCaptchaV3Provider(
+        '6LctFtUkAAAAAGgZQ58fQcDOHB4Orf7BHMi5z0Al',
+      ),
+      isTokenAutoRefreshEnabled: true,
+    })
+  })
+}
 
 export const db = getFirestore(app)
 
 export default function initFirebase() {
-  if (!firebase?.getApps?.length) {
-    firebase?.initializeApp(clientCredentials)
+  if (!getApps?.length) {
+    initializeApp(clientCredentials)
     console.log('Firebase app initialized')
   }
 }
