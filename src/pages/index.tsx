@@ -1,11 +1,32 @@
+import { useEffect, useState } from 'react'
 import Head from 'next/head'
-import { Cormorant_Garamond, Inter } from 'next/font/google'
+import { JetBrains_Mono, Manrope } from 'next/font/google'
 import RandomBackground from '@/components/RandomBackground'
 
-const serif = Cormorant_Garamond({ subsets: ['latin'], weight: ['300'], variable: '--font-serif' })
-const sans = Inter({ subsets: ['latin'], variable: '--font-sans' })
+const sans = Manrope({ subsets: ['latin'], weight: ['300'], variable: '--font-sans' })
+const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['300'], variable: '--font-mono-face' })
+
+type Face = 'sans' | 'mono'
+const FACE_KEY = 'orlondorue:face'
+
+// The name switches between the two faces on every visit (the first visit picks at random).
+function nextFace(): Face {
+  let last: string | null = null
+  try {
+    last = window.localStorage.getItem(FACE_KEY)
+  } catch {}
+  const next: Face = last === 'sans' ? 'mono' : last === 'mono' ? 'sans' : Math.random() < 0.5 ? 'sans' : 'mono'
+  try {
+    window.localStorage.setItem(FACE_KEY, next)
+  } catch {}
+  return next
+}
 
 export default function Home() {
+  const [face, setFace] = useState<Face | null>(null)
+  useEffect(() => setFace(nextFace()), [])
+  const family = face === 'mono' ? 'font-[family-name:var(--font-mono-face)]' : 'font-[family-name:var(--font-sans)]'
+
   return (
     <>
       <Head>
@@ -27,13 +48,15 @@ export default function Home() {
           }}
         />
       </Head>
-      <main className={`${serif.variable} ${sans.variable} relative h-dvh w-full overflow-hidden bg-[#0b0c0f] text-white`}>
+      <main className={`${sans.variable} ${mono.variable} relative h-dvh w-full overflow-hidden bg-[#0b0c0f] text-white`}>
         <RandomBackground />
-        <div className="rise absolute inset-x-6 bottom-10 sm:inset-x-12 sm:bottom-14">
-          <h1 className="font-[family-name:var(--font-serif)] text-[clamp(3rem,10vw,7.5rem)] font-light leading-[0.95] tracking-tight">
+        <div
+          className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-6 bottom-10 sm:inset-x-12 sm:bottom-14`}
+        >
+          <h1 className="text-[clamp(2.75rem,9.5vw,7rem)] font-light leading-[0.95] tracking-tight">
             Orlondo Rue
           </h1>
-          <p className="mt-5 max-w-md font-[family-name:var(--font-sans)] text-sm leading-relaxed text-white/70 sm:text-base">
+          <p className="mt-5 max-w-md text-sm leading-relaxed text-white/70 sm:text-base">
             I make calm things with AI: images, video and the software behind them.
           </p>
         </div>
