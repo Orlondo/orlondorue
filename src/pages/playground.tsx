@@ -9115,13 +9115,8 @@ export default () => {
     return _isEqual(_omit(a, 'orderId'), _omit(b, 'orderId'))
   }
 
-  console.log('dataLayer: ', typeof window !== 'undefined' ? window.dataLayer : undefined)
-
   // Remove duplicate orders based on the custom comparator
   let uniqueOrders = _uniqWith(savedOrders, comparator)
-
-  console.log('savedOrders', savedOrders)
-  console.log('uniqueOrders', uniqueOrders)
 
   uniqueOrders = _uniqWith([...currentOrder, ...uniqueOrders], comparator)
 
@@ -9147,7 +9142,6 @@ export default () => {
       <p>{value}</p>
 
       {_map(updatedOrders, item => {
-        console.log('item', item)
         return (
           <div
             key={item.orderId}
