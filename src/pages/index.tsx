@@ -6,12 +6,6 @@ import styles from '@/styles/Home.module.css'
 
 const inter = Inter({ subsets: ['latin'] })
 
-declare global {
-  interface Window {
-    dataLayer: any[]
-  }
-}
-
 export default function Home() {
   return (
     <>

@@ -6,12 +6,6 @@ import _isEqual from 'lodash/isEqual'
 import _omit from 'lodash/omit'
 import _uniqWith from 'lodash/uniqWith'
 
-declare global {
-  interface Window {
-    dataLayer: any;
-  }
-}
-
 export default () => {
   const [value, setValue] = useState(0)
   const savedOrders = [
