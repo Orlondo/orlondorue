@@ -51,12 +51,12 @@ export default function Home() {
       <main className={`${sans.variable} ${mono.variable} relative h-dvh w-full overflow-hidden bg-[#0b0c0f] text-white`}>
         <RandomBackground />
         <div
-          className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-6 bottom-10 sm:inset-x-12 sm:bottom-14`}
+          className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-7 bottom-8 sm:inset-x-10 sm:bottom-10`}
         >
-          <h1 className="text-[clamp(2.75rem,9.5vw,7rem)] font-light leading-[0.95] tracking-tight">
+          <h1 className="text-xs font-light uppercase tracking-[0.4em] text-white/80 sm:text-sm">
             Orlondo Rue
           </h1>
-          <p className="mt-5 max-w-md text-sm leading-relaxed text-white/70 sm:text-base">
+          <p className="mt-3 max-w-xs text-xs leading-relaxed tracking-wide text-white/40">
             I make calm things with AI: images, video and the software behind them.
           </p>
         </div>

@@ -60,8 +60,8 @@ export default function RandomBackground() {
         />
       ) : null}
       {/* soft darkening so the name stays readable on any picture */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,6,8,0.6)_100%)]" />
-      <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/10 to-black/30" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,6,8,0.4)_100%)]" />
+      <div className="absolute inset-0 bg-linear-to-t from-black/50 via-transparent to-black/10" />
     </div>
   )
 }
