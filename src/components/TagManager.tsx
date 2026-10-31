@@ -1,9 +1,3 @@
-declare global {
-  interface Window {
-    dataLayer: any[]
-  }
-}
-
 export default () => {
   const pushDataLayer = (data: any) => {
     console.log('window?.dataLayer', window?.dataLayer)
