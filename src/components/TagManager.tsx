@@ -1,6 +1,5 @@
 export default () => {
   const pushDataLayer = (data: any) => {
-    console.log('window?.dataLayer', window?.dataLayer)
     window?.dataLayer.push(data)
   }
 

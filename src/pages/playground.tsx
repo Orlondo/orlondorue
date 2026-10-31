@@ -9164,11 +9164,7 @@ export default () => {
                 </li>
               ))}
             </ul>
-            <button
-              onClick={() => console.log(`Button ${item.orderId} clicked`)}
-            >
-              {`Submit Order ${item.orderId}`}
-            </button>
+            <button>{`Submit Order ${item.orderId}`}</button>
           </div>
         )
       })}

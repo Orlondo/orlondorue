@@ -39,6 +39,5 @@ export const db = getFirestore(app)
 export default function initFirebase() {
   if (!getApps?.length) {
     initializeApp(clientCredentials)
-    console.log('Firebase app initialized')
   }
 }
