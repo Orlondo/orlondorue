@@ -9115,7 +9115,7 @@ export default () => {
     return _isEqual(_omit(a, 'orderId'), _omit(b, 'orderId'))
   }
 
-  console.log('dataLayer: ', window?.dataLayer)
+  console.log('dataLayer: ', typeof window !== 'undefined' ? window.dataLayer : undefined)
 
   // Remove duplicate orders based on the custom comparator
   let uniqueOrders = _uniqWith(savedOrders, comparator)
