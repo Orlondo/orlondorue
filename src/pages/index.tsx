@@ -53,10 +53,10 @@ export default function Home() {
         <div
           className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-7 bottom-8 sm:inset-x-10 sm:bottom-10`}
         >
-          <h1 className="text-xs font-light uppercase tracking-[0.4em] text-white/80 sm:text-sm">
+          <h1 className="text-sm font-light uppercase tracking-[0.4em] text-white/80 sm:text-lg">
             Orlondo Rue
           </h1>
-          <p className="mt-3 max-w-xs text-xs leading-relaxed tracking-wide text-white/40">
+          <p className="mt-3 max-w-xs text-sm leading-relaxed tracking-wide text-white/40">
             I make calm things with AI: images, video and the software behind them.
           </p>
         </div>
