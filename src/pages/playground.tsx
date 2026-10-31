@@ -6,6 +6,12 @@ import _isEqual from 'lodash/isEqual'
 import _omit from 'lodash/omit'
 import _uniqWith from 'lodash/uniqWith'
 
+declare global {
+  interface Window {
+    dataLayer: any;
+  }
+}
+
 export default () => {
   const [value, setValue] = useState(0)
   const savedOrders = [
@@ -9114,6 +9120,8 @@ export default () => {
   const comparator = (a: Order, b: Order): boolean => {
     return _isEqual(_omit(a, 'orderId'), _omit(b, 'orderId'))
   }
+
+  console.log('dataLayer: ', window?.dataLayer)
 
   // Remove duplicate orders based on the custom comparator
   let uniqueOrders = _uniqWith(savedOrders, comparator)

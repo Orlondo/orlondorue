@@ -1,9 +1,16 @@
 import Head from 'next/head'
 import Image from 'next/image'
 import { Inter } from '@next/font/google'
+import TagManager from '@/components/TagManager'
 import styles from '@/styles/Home.module.css'
 
 const inter = Inter({ subsets: ['latin'] })
+
+declare global {
+  interface Window {
+    dataLayer: any[]
+  }
+}
 
 export default function Home() {
   return (
@@ -15,7 +22,7 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <link href="./output.css" rel="stylesheet" />
         <link rel="icon" href="/favicon.ico" />
-
+        <script>window.dataLayer = window.dataLayer || [];</script>
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -131,6 +138,7 @@ export default function Home() {
             </p>
           </a>
         </div>
+        <TagManager />
       </main>
     </>
   )
