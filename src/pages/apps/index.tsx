@@ -11,6 +11,7 @@ export default function Apps() {
           content="Two tools for making calm interior-design videos: an AI interior image generator and a studio that turns images into finished YouTube videos."
         />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="robots" content="noindex, nofollow" />
       </Head>
       <div className="min-h-screen bg-[#0f1115] text-[#e8eaf0] font-sans leading-relaxed">
         <div className="mx-auto max-w-[1040px] px-4 pb-20">
