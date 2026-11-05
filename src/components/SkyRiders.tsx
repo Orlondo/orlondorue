@@ -3,25 +3,27 @@ import { useEffect, useRef } from 'react'
 // SkyRiders of the Velvet Sunset: an original flap-and-collide arcade game with a 70s airbrushed van-mural look.
 // A hero on a winged horse battles sorcerers on griffins above a molten lake. Whoever is higher when they meet wins.
 // When nobody is playing it runs an attract mode where the hero flies itself.
+//
+// The game fills whatever box it is given. The world is 500 units tall on wide screens and 400 units wide on tall
+// ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
 
-const W = 800
-const H = 500
 const GRAVITY = 0.22
 const FLAP = -4.2
-const LAVA_Y = H - 40
 
 type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number }
 type Mode = 'attract' | 'play' | 'over'
+type Platform = { x: number; y: number; w: number }
 
-const platforms = [
-  { x: 80, y: 360, w: 160 },
-  { x: 560, y: 360, w: 160 },
-  { x: 300, y: 250, w: 200 },
-  { x: 40, y: 150, w: 140 },
-  { x: 620, y: 150, w: 140 },
+// Ledges as fractions of the world, so they spread out on any screen shape.
+const LEDGES = [
+  { fx: 0.1, fy: 0.72, fw: 0.2 },
+  { fx: 0.7, fy: 0.72, fw: 0.2 },
+  { fx: 0.375, fy: 0.5, fw: 0.25 },
+  { fx: 0.05, fy: 0.3, fw: 0.18 },
+  { fx: 0.77, fy: 0.3, fw: 0.18 },
 ]
 
-export default function SkyRiders({ className = '' }: { className?: string }) {
+export default function SkyRiders({ className = 'block h-full w-full' }: { className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -29,6 +31,33 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+
+    // ---- world size, matched to the screen ----
+    let W = 800
+    let H = 500
+    let LAVA_Y = H - 40
+    let platforms: Platform[] = []
+
+    const fit = () => {
+      const rect = canvas.getBoundingClientRect()
+      const cw = Math.max(1, rect.width)
+      const ch = Math.max(1, rect.height)
+      if (cw >= ch) {
+        H = 500
+        W = Math.round((500 * cw) / ch)
+      } else {
+        W = 400
+        H = Math.round((400 * ch) / cw)
+      }
+      LAVA_Y = H - 40
+      platforms = LEDGES.map((l) => ({ x: l.fx * W, y: l.fy * H, w: Math.max(90, l.fw * W) }))
+      // draw at the screen's real resolution so the art stays crisp
+      const scale = (cw / W) * (window.devicePixelRatio || 1)
+      canvas.width = Math.round(W * scale)
+      canvas.height = Math.round(H * scale)
+      ctx.setTransform(scale, 0, 0, scale, 0, 0)
+    }
+    fit()
 
     let audio: AudioContext | null = null
     const beep = (freq: number, dur = 0.08, type: OscillatorType = 'square') => {
@@ -54,15 +83,20 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
     let raf = 0
 
     const newRider = (x: number, y: number): Rider => ({ x, y, vx: 0, vy: 0, dir: 1, wing: 0, alive: true, safe: 0 })
-    let player = newRider(W / 2, 200)
+    const spawnHero = () => {
+      const r = newRider(W / 2, H * 0.4)
+      r.safe = 90
+      return r
+    }
+    let player = spawnHero()
     let enemies: Rider[] = []
 
     const startWave = () => {
-      enemies = Array.from({ length: Math.min(2 + wave, 7) }, (_, i) => newRider(80 + ((i * 160) % (W - 160)), 50))
+      const count = Math.min(2 + wave, 7)
+      enemies = Array.from({ length: count }, (_, i) => newRider(((i + 0.5) / count) * W, 50))
     }
     const reset = () => {
-      player = newRider(W / 2, 200)
-      player.safe = 90
+      player = spawnHero()
       score = 0
       lives = 3
       wave = 1
@@ -120,8 +154,7 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
         return
       }
       lives--
-      player = newRider(W / 2, 200)
-      player.safe = 90
+      player = spawnHero()
       if (lives <= 0) mode = 'over'
     }
 
@@ -156,36 +189,40 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
 
       // stars in the upper sky
       ctx.fillStyle = 'rgba(255,255,255,0.7)'
-      for (let i = 0; i < 40; i++) {
+      const starCount = Math.round(W / 20)
+      for (let i = 0; i < starCount; i++) {
         const sx = (i * 197) % W
-        const sy = (i * 83) % 160
+        const sy = (i * 83) % (H * 0.32)
         if ((i + Math.floor(t / 30)) % 7) ctx.fillRect(sx, sy, 2, 2)
       }
 
-      const sun = ctx.createRadialGradient(W / 2, 330, 10, W / 2, 330, 170)
+      const sunY = H * 0.66
+      const sun = ctx.createRadialGradient(W / 2, sunY, 10, W / 2, sunY, 170)
       sun.addColorStop(0, 'rgba(255,240,180,0.95)')
       sun.addColorStop(1, 'rgba(255,120,60,0)')
       ctx.fillStyle = sun
       ctx.beginPath()
-      ctx.arc(W / 2, 330, 170, 0, Math.PI * 2)
+      ctx.arc(W / 2, sunY, 170, 0, Math.PI * 2)
       ctx.fill()
 
       // a pale ringed planet
+      const px = W * 0.81
+      const py = H * 0.16
       ctx.fillStyle = 'rgba(190,225,255,0.55)'
       ctx.beginPath()
-      ctx.arc(650, 80, 35, 0, Math.PI * 2)
+      ctx.arc(px, py, 35, 0, Math.PI * 2)
       ctx.fill()
       ctx.strokeStyle = 'rgba(255,230,200,0.5)'
       ctx.lineWidth = 3
       ctx.beginPath()
-      ctx.ellipse(650, 80, 60, 12, -0.3, 0, Math.PI * 2)
+      ctx.ellipse(px, py, 60, 12, -0.3, 0, Math.PI * 2)
       ctx.stroke()
 
       // misty mountains
       ctx.fillStyle = '#3a1450'
       ctx.beginPath()
       ctx.moveTo(0, LAVA_Y)
-      for (let x = 0; x <= W; x += 80) ctx.lineTo(x, LAVA_Y - 60 - Math.sin(x * 0.02) * 40)
+      for (let x = 0; x <= W + 80; x += 80) ctx.lineTo(x, LAVA_Y - 60 - Math.sin(x * 0.02) * 40)
       ctx.lineTo(W, LAVA_Y)
       ctx.fill()
     }
@@ -238,8 +275,16 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
       ctx.restore()
     }
 
+    // Centered title text that shrinks to fit narrow screens.
     const title = (s: string, y: number, size = 28) => {
-      ctx.font = `bold ${size}px Georgia, serif`
+      let px = size
+      ctx.font = `bold ${px}px Georgia, serif`
+      const max = W - 40
+      const width = ctx.measureText(s).width
+      if (width > max) {
+        px = Math.max(12, Math.floor((size * max) / width))
+        ctx.font = `bold ${px}px Georgia, serif`
+      }
       ctx.textAlign = 'center'
       ctx.fillStyle = '#2b0a4a'
       ctx.fillText(s, W / 2 + 3, y + 3)
@@ -278,17 +323,18 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
       enemies.forEach((e) => drawRider(e, false))
       drawRider(player, true)
 
+      const top = H * 0.2
       if (mode === 'play') {
         ctx.font = '16px monospace'
         ctx.textAlign = 'left'
         ctx.fillStyle = '#fff'
-        ctx.fillText(`SCORE ${score}   LIVES ${lives}   WAVE ${wave}`, 12, 24)
+        ctx.fillText(`SCORE ${score}   LIVES ${lives}   WAVE ${wave}`, 16, 28)
       } else if (mode === 'attract') {
-        title('SKYRIDERS OF THE VELVET SUNSET', 110, 30)
-        if (Math.floor(t / 40) % 2) title('Press SPACE or tap to ride', 160, 20)
+        title('SKYRIDERS OF THE VELVET SUNSET', top, 34)
+        if (Math.floor(t / 40) % 2) title('Press SPACE or tap to ride', top + 44, 20)
       } else {
-        title('GAME OVER', 200, 44)
-        title(`Score ${score}  ·  tap or press SPACE`, 250, 20)
+        title('GAME OVER', H * 0.4, 44)
+        title(`Score ${score}  ·  tap or press SPACE`, H * 0.4 + 50, 20)
       }
       raf = requestAnimationFrame(loop)
     }
@@ -323,12 +369,21 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
     const onPointerUp = () => {
       steer = 0
     }
+    // Keep riders on screen if the window changes shape.
+    const onResize = () => {
+      fit()
+      for (const r of [player, ...enemies]) {
+        r.x = Math.min(r.x, W)
+        r.y = Math.min(r.y, LAVA_Y - 60)
+      }
+    }
 
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     canvas.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('pointerup', onPointerUp)
     window.addEventListener('pointercancel', onPointerUp)
+    window.addEventListener('resize', onResize)
 
     raf = requestAnimationFrame(loop)
     return () => {
@@ -338,6 +393,7 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
       canvas.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
+      window.removeEventListener('resize', onResize)
       void audio?.close()
     }
   }, [])
@@ -345,10 +401,8 @@ export default function SkyRiders({ className = '' }: { className?: string }) {
   return (
     <canvas
       ref={ref}
-      width={W}
-      height={H}
       aria-label="SkyRiders of the Velvet Sunset, a small arcade game. Press space or tap to play."
-      className={`block h-auto w-full touch-none select-none ${className}`}
+      className={`touch-none select-none ${className}`}
     />
   )
 }

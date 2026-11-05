@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import Head from 'next/head'
 import { JetBrains_Mono, Manrope } from 'next/font/google'
 import RandomBackground from '@/components/RandomBackground'
-import SkyRiders from '@/components/SkyRiders'
 
 const sans = Manrope({ subsets: ['latin'], weight: ['300'], variable: '--font-sans' })
 const mono = JetBrains_Mono({ subsets: ['latin'], weight: ['300'], variable: '--font-mono-face' })
@@ -51,10 +50,6 @@ export default function Home() {
       </Head>
       <main className={`${sans.variable} ${mono.variable} relative h-dvh w-full overflow-hidden bg-[#0b0c0f] text-white`}>
         <RandomBackground />
-        {/* a small arcade window over the rotating media, playing itself until someone taps in */}
-        <div className="rise absolute inset-x-7 top-7 overflow-hidden rounded-xl border border-white/15 shadow-2xl shadow-black/50 sm:inset-x-auto sm:top-auto sm:right-10 sm:bottom-10 sm:w-[min(420px,40vw)]">
-          <SkyRiders />
-        </div>
         <div
           className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-7 bottom-8 sm:inset-x-10 sm:bottom-10`}
         >

@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
 import { backgrounds } from '@/data/backgrounds'
+import SkyRiders from '@/components/SkyRiders'
 
 const LAST_KEY = 'orlondorue:last-background'
 
 // A random one, and never the same as the last visit (when the browser lets us remember it).
-function pickIndex(): number {
+// People who prefer less motion never get the game.
+function pickIndex(still: boolean): number {
   let last = -1
   try {
     last = Number(window.localStorage.getItem(LAST_KEY) ?? -1)
   } catch {}
-  let next = Math.floor(Math.random() * backgrounds.length)
-  if (backgrounds.length > 1 && next === last) next = (next + 1) % backgrounds.length
+  const allowed = backgrounds.map((_, i) => i).filter((i) => !(still && backgrounds[i].type === 'game'))
+  let pos = Math.floor(Math.random() * allowed.length)
+  if (allowed.length > 1 && allowed[pos] === last) pos = (pos + 1) % allowed.length
+  const next = allowed[pos]
   try {
     window.localStorage.setItem(LAST_KEY, String(next))
   } catch {}
@@ -24,8 +28,14 @@ export default function RandomBackground() {
 
   // Chosen after the page loads, so every visitor gets a fresh pick and the server page can stay static.
   useEffect(() => {
-    setStill(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-    setIndex(pickIndex())
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    setStill(reduce)
+    // Adding ?bg=game to the address always shows the game, which is handy for checking it.
+    const forceGame = new URLSearchParams(window.location.search).get('bg') === 'game'
+    const gameIndex = backgrounds.findIndex((b) => b.type === 'game')
+    const picked = forceGame && gameIndex >= 0 ? gameIndex : pickIndex(reduce)
+    setIndex(picked)
+    if (backgrounds[picked].type === 'game') setReady(true)
     const showAnyway = window.setTimeout(() => setReady(true), 3000)
     return () => window.clearTimeout(showAnyway)
   }, [])
@@ -36,8 +46,10 @@ export default function RandomBackground() {
   }`
 
   return (
-    <div aria-hidden="true" className="absolute inset-0 overflow-hidden bg-[#0b0c0f]">
-      {item?.type === 'video' && !still ? (
+    <div aria-hidden={item?.type === 'game' ? undefined : true} className="absolute inset-0 overflow-hidden bg-[#0b0c0f]">
+      {item?.type === 'game' ? (
+        <SkyRiders className={fill} />
+      ) : item?.type === 'video' && !still ? (
         <video
           className={fill}
           src={item.src}
@@ -53,15 +65,15 @@ export default function RandomBackground() {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           className={`${fill} ${still ? '' : 'bg-drift'}`}
-          src={item.type === 'video' ? item.poster : item.src}
+          src={item.type === 'image' ? item.src : item.poster}
           alt=""
           onLoad={() => setReady(true)}
           onError={() => setReady(true)}
         />
       ) : null}
       {/* soft darkening so the name stays readable on any picture */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,6,8,0.4)_100%)]" />
-      <div className="absolute inset-0 bg-linear-to-t from-black/50 via-transparent to-black/10" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(5,6,8,0.4)_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/50 via-transparent to-black/10" />
     </div>
   )
 }
