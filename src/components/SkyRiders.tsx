@@ -8,6 +8,9 @@ import { useEffect, useRef } from 'react'
 // wide screen), then scaled up with hard square pixels. The scenery, islands, clouds, sprites and lettering are
 // painted once as shapes and then snapped to a fixed palette, with checkerboard dithering and one-pixel outlines.
 // Stars, lava, lavafalls, sparks and glints are drawn pixel by pixel every frame.
+// On top of that sit the touches a game made today would add: parallax scenery that slides as the hero moves,
+// bloom and pools of light at full screen resolution, slowly turning light shafts, a colour grade, screen shake,
+// a short freeze on hits, score popups and a shine sweeping across the logo.
 //
 // The game fills whatever box it is given. The game world is 500 units tall on wide screens and 400 units wide on
 // tall ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
@@ -564,7 +567,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let falls: Fall[] = []
     let heroFrames: Frame[] = []
     let foeFrames: Frame[] = []
-    const backdrop = document.createElement('canvas')
+    // The scenery is split into layers that slide at different speeds as the hero moves (parallax).
+    // Each is a little wider than the screen, by M pixels on both sides, so the edges never show.
+    const M = 18
+    const backdrop = document.createElement('canvas') // the sky, sun and planets: the farthest layer
+    const farLayer = document.createElement('canvas')
+    const midLayer = document.createElement('canvas')
+    const nearLayer = document.createElement('canvas')
+    const LAYERS = [backdrop, farLayer, midLayer, nearLayer]
     const islands = document.createElement('canvas')
     const labels = new Map<string, Label>()
 
@@ -572,9 +582,19 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // ---- the painted scenery behind everything, drawn once per screen size ----
     const paintBackdrop = () => {
-      const c = backdrop.getContext('2d')
-      if (!c) return
-      c.setTransform(k, 0, 0, k, 0, 0)
+      const first = backdrop.getContext('2d')
+      if (!first) return
+      let c: Draw = first
+      // switch painting to another layer, with the same world coordinates and the side margin
+      const useLayer = (cv: HTMLCanvasElement) => {
+        const next = cv.getContext('2d')
+        if (!next) return
+        c = next
+        c.setTransform(1, 0, 0, 1, 0, 0)
+        c.clearRect(0, 0, cv.width, cv.height)
+        c.setTransform(k, 0, 0, k, M, 0)
+      }
+      useLayer(backdrop)
       const horizon = LAVA_Y - 40
       const rand = seeded(11)
 
@@ -590,7 +610,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         [1, '#ffc65c'],
       ])
       c.fillStyle = sky
-      c.fillRect(0, 0, W, H)
+      c.fillRect(-M / k, 0, W + (2 * M) / k, H)
 
       // nebula clouds in the high sky
       const blob = (fx: number, fy: number, r: number, col: string) => {
@@ -649,7 +669,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       halo.addColorStop(0, 'rgba(255,200,120,0.6)')
       halo.addColorStop(1, 'rgba(255,110,120,0)')
       c.fillStyle = halo
-      c.fillRect(0, 0, W, H)
+      c.fillRect(-M / k, 0, W + (2 * M) / k, H)
       for (const [rr, a] of [
         [1.22, 0.22],
         [1.45, 0.14],
@@ -787,6 +807,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         c.fillRect(ix + size * 0.5, iy, 2.5, size * 3)
       }
 
+      useLayer(farLayer)
       // mountain ranges with natural, eroded ridgelines. Every column is lit by how much its slope faces the
       // sun, roughened with a little noise for gullies, then faded into the haze the further away the range is.
       const range = (
@@ -810,7 +831,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         const fog = rgb(colours.fog)
         const step = 1 / k
         let gully = 0
-        for (let x = 0; x < W + step; x += step) {
+        for (let x = -M / k; x < W + M / k + step; x += step) {
           const y = ridgeAt(x)
           const slope = (ridgeAt(x + step * 5) - ridgeAt(x - step * 5)) / (step * 10)
           const facing = x < sunX ? slope : -slope
@@ -875,6 +896,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       c.fillStyle = mistBand
       c.fillRect(0, horizon - 70, W, 80)
 
+      useLayer(midLayer)
       range(4, horizon + 10, 95, 0.5, {
         lit: '#e8506a',
         shade: '#6a2a86',
@@ -883,6 +905,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         fogAmount: 0.22,
         rim: '#ff8a3d',
       })
+      useLayer(nearLayer)
       const nearRidge = range(6, LAVA_Y + 6, 70, 0.5, {
         lit: '#b03a86',
         shade: '#2b0a4a',
@@ -941,24 +964,32 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         }
       }
 
-      c.setTransform(1, 0, 0, 1, 0, 0)
       quantize(backdrop, 20, false)
+      quantize(farLayer, 16, false)
+      quantize(midLayer, 12, false)
+      quantize(nearLayer, 8, false)
 
       // single-pixel details added after pixelating, so they stay crisp
-      const img = c.getImageData(0, 0, LW, LH)
+      const skyC = backdrop.getContext('2d')
+      const farC = farLayer.getContext('2d')
+      if (!skyC || !farC) return
+      const SW = backdrop.width
+      const img = skyC.getImageData(0, 0, SW, LH)
       const dark = (x: number, y: number) => {
-        const i = (y * LW + x) * 4
+        const i = (y * SW + x) * 4
         return img.data[i] + img.data[i + 1] + img.data[i + 2] < 260
       }
       // a dust of faint background stars, only where the sky is dark
-      for (let s = 0; s < LW * LH * 0.004; s++) {
-        const x = Math.floor(rand() * LW)
+      for (let s = 0; s < SW * LH * 0.004; s++) {
+        const x = Math.floor(rand() * SW)
         const y = Math.floor(rand() * LH * 0.5)
         if (!dark(x, y)) continue
-        c.fillStyle = rand() < 0.25 ? '#a98cf0' : '#6a2a86'
-        c.fillRect(x, y, 1, 1)
+        skyC.fillStyle = rand() < 0.25 ? '#a98cf0' : '#5a2a7a'
+        skyC.fillRect(x, y, 1, 1)
       }
       // lit windows in the castle towers
+      c = farC
+      c.setTransform(1, 0, 0, 1, M, 0)
       c.fillStyle = '#ffe08a'
       for (const [dx, h] of towers) {
         for (let wy = 0; wy < 2; wy++) c.fillRect(X(castleX + dx), X(ridge - h + 6 + wy * 10), 1, 1)
@@ -1263,8 +1294,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }))
       canvas.width = LW * pixel
       canvas.height = LH * pixel
-      for (const cv of [buffer, backdrop, islands]) {
+      for (const cv of [buffer, islands]) {
         cv.width = LW
+        cv.height = LH
+      }
+      for (const cv of LAYERS) {
+        cv.width = LW + 2 * M
         cv.height = LH
       }
       labels.clear()
@@ -1300,6 +1335,28 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let raf = 0
     let sparks: Spark[] = []
     let comet = { x: -100, y: 0, life: 0 }
+    // modern touches: a camera that eases after the hero (for parallax), screen shake, a brief freeze on hits,
+    // and score popups
+    let camX = 0
+    let shake = 0
+    let freeze = 0
+    let popups: { x: number; y: number; text: string; life: number }[] = []
+
+    // the bloom pass works on a half-size copy of the frame; check once that this browser applies canvas filters,
+    // since without them the bloom would just wash the picture out
+    const bloom = document.createElement('canvas')
+    const bl = bloom.getContext('2d', { willReadFrequently: true })
+    let canBloom = false
+    if (bl && 'filter' in bl) {
+      bloom.width = 2
+      bloom.height = 1
+      bl.fillStyle = '#ffffff'
+      bl.fillRect(0, 0, 2, 1)
+      bl.filter = 'brightness(0)'
+      bl.drawImage(bloom, 0, 0)
+      bl.filter = 'none'
+      canBloom = bl.getImageData(0, 0, 1, 1).data[0] < 20
+    }
 
     const burst = (x: number, y: number, n: number, colors: string[], speed = 3, size = 2.5) => {
       for (let i = 0; i < n; i++) {
@@ -1390,6 +1447,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const loseLife = () => {
       beep(80, 0.4, 'sawtooth')
+      shake = Math.max(shake, 9)
       burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffc65c', '#ff5a1f', '#ffe08a'], 3.5, 3)
       if (mode !== 'play') {
         reset()
@@ -1408,10 +1466,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           player.vx = -player.vx * 1.5 || -3
           e.vx = -e.vx * 1.5 || 3
           burst((e.x + player.x) / 2, (e.y + player.y) / 2, 8, ['#ffffff', '#9fdcff'], 2, 1.8)
+          shake = Math.max(shake, 2)
           beep(110)
         } else if (player.y < e.y) {
           e.alive = false
           score += 500
+          shake = Math.max(shake, 5)
+          freeze = 4
+          popups.push({ x: e.x, y: e.y - 20, text: '+500', life: 55 })
           burst(e.x, e.y, 30, ['#ffe08a', '#d7c4ff', '#a98cf0', '#ffffff'], 3.2, 2.6)
           beep(660, 0.15, 'triangle')
         } else if (player.safe === 0) {
@@ -1659,36 +1721,191 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const place = (l: Label, worldY: number) => b.drawImage(l.img, 0, X(worldY) - l.base)
 
+    // the logo's shine is composed on its own small canvas each frame
+    const shine = document.createElement('canvas')
+    const sh = shine.getContext('2d')
+
+    const drawLayer = (cv: HTMLCanvasElement, off: number) => b.drawImage(cv, -M + off, 0)
+    const shifted = (off: number, draw: () => void) => {
+      b.save()
+      b.translate(off, 0)
+      draw()
+      b.restore()
+    }
+
+    const drawPopups = () => {
+      for (const p of popups) {
+        p.life--
+        p.y -= 0.6
+        if (p.life < 12 && p.life % 2) continue
+        const l = caption(p.text, 14, 'left')
+        b.drawImage(l.img, X(p.x) - 6 - Math.round(l.half), X(p.y) - l.base)
+      }
+      popups = popups.filter((p) => p.life > 0)
+    }
+
+    // The logo floats gently, and a bright band sweeps across its chrome every few seconds.
+    const drawLogo = (worldY: number) => {
+      const title = chrome('SkyRiders', 64)
+      const bob = Math.round(Math.sin(t * 0.04) * 2)
+      const y = X(worldY) - title.base + bob
+      let img: HTMLCanvasElement = title.img
+      const sweep = (t % 240) * 4 - 60
+      if (sh && sweep < LW + 60) {
+        if (shine.width !== title.img.width || shine.height !== title.img.height) {
+          shine.width = title.img.width
+          shine.height = title.img.height
+        }
+        sh.globalCompositeOperation = 'source-over'
+        sh.clearRect(0, 0, shine.width, shine.height)
+        sh.drawImage(title.img, 0, 0)
+        sh.globalCompositeOperation = 'source-atop'
+        for (const [dx, w, col] of [
+          [0, 6, '#fff6c8'],
+          [2, 2, '#ffffff'],
+          [10, 2, '#fff6c8'],
+        ] as [number, number, string][]) {
+          sh.fillStyle = col
+          sh.beginPath()
+          sh.moveTo(sweep + dx, 0)
+          sh.lineTo(sweep + dx + w, 0)
+          sh.lineTo(sweep + dx + w - shine.height * 0.6, shine.height)
+          sh.lineTo(sweep + dx - shine.height * 0.6, shine.height)
+          sh.fill()
+        }
+        img = shine
+      }
+      b.drawImage(img, 0, y)
+      const swing = Math.floor(t / 30) % 2
+      glint(Math.round(LW / 2 + title.half - 6), y + title.base - X(46), swing ? 3 : 2)
+      glint(Math.round(LW / 2 - title.half + 10), y + title.base - X(6), swing ? 1 : 2)
+    }
+
+    // ---- the modern pass, at full screen resolution over the pixel art ----
+    const post = (sx: number, sy: number, offs: { sky: number; near: number }) => {
+      const S = pixel
+      const fullW = LW * S
+      const fullH = LH * S
+      // bloom: the bright parts of the frame, blurred and added back as a soft glow
+      if (canBloom && bl) {
+        const bw = Math.ceil(LW / 2)
+        const bh = Math.ceil(LH / 2)
+        if (bloom.width !== bw || bloom.height !== bh) {
+          bloom.width = bw
+          bloom.height = bh
+        }
+        bl.filter = 'brightness(0.55) contrast(3.2) blur(1.5px)'
+        bl.clearRect(0, 0, bw, bh)
+        bl.drawImage(buffer, 0, 0, bw, bh)
+        bl.filter = 'none'
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalAlpha = 0.32
+        ctx.imageSmoothingEnabled = true
+        ctx.drawImage(bloom, sx, sy, fullW, fullH)
+        ctx.restore()
+      }
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      // slow light shafts turning out from the sun
+      const sunR = Math.min(W, H) * 0.24
+      const horizon = LAVA_Y - 40
+      const cx = (LW / 2 + offs.sky) * S + sx
+      const cy = (horizon - sunR * 0.35) * k * S + sy
+      const reach = Math.max(fullW, fullH)
+      for (let i = 0; i < 7; i++) {
+        const a = Math.PI + 0.3 + i * 0.4 + Math.sin(t * 0.004 + i) * 0.08
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, reach * 0.7)
+        g.addColorStop(0, 'rgba(255,200,140,0.10)')
+        g.addColorStop(1, 'rgba(255,200,140,0)')
+        ctx.fillStyle = g
+        ctx.beginPath()
+        ctx.moveTo(cx, cy)
+        ctx.lineTo(cx + Math.cos(a - 0.05) * reach, cy + Math.sin(a - 0.05) * reach)
+        ctx.lineTo(cx + Math.cos(a + 0.05) * reach, cy + Math.sin(a + 0.05) * reach)
+        ctx.closePath()
+        ctx.fill()
+      }
+      // the lava lights the air above it, breathing slowly
+      const lavaTop = LAVA_Y * k * S + sy
+      const breathe = 0.16 + Math.sin(t * 0.03) * 0.04
+      const lg = ctx.createLinearGradient(0, lavaTop - 160 * (S / 4), 0, fullH + sy)
+      lg.addColorStop(0, 'rgba(255,90,30,0)')
+      lg.addColorStop(0.6, `rgba(255,90,30,${breathe})`)
+      lg.addColorStop(1, `rgba(255,140,40,${breathe * 1.4})`)
+      ctx.fillStyle = lg
+      ctx.fillRect(sx, lavaTop - 160 * (S / 4), fullW, fullH)
+      // little pools of light: crystals, sorcerers' orbs, lavafalls and the waterfall
+      const light = (wx: number, wy: number, r: number, col: string, a: number, shift = 0) => {
+        const x = (X(wx) + shift) * S + sx
+        const y = X(wy) * S + sy
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r * S)
+        g.addColorStop(0, col.replace('A', String(a)))
+        g.addColorStop(1, col.replace('A', '0'))
+        ctx.fillStyle = g
+        ctx.fillRect(x - r * S, y - r * S, r * S * 2, r * S * 2)
+      }
+      for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
+      for (const e of enemies) if (e.alive) light(e.x + e.dir * 12 * SPRITE_SCALE, e.y - 28 * SPRITE_SCALE, 9, 'rgba(179,136,255,A)', 0.3)
+      for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
+      const isle = platforms[2]
+      if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
+      ctx.restore()
+      // a cinematic grade: cool sky, warm ground
+      ctx.save()
+      ctx.globalCompositeOperation = 'soft-light'
+      const grade = ctx.createLinearGradient(0, sy, 0, fullH + sy)
+      grade.addColorStop(0, 'rgba(70,90,220,0.35)')
+      grade.addColorStop(0.55, 'rgba(255,255,255,0)')
+      grade.addColorStop(1, 'rgba(255,120,50,0.35)')
+      ctx.fillStyle = grade
+      ctx.fillRect(sx, sy, fullW, fullH)
+      ctx.restore()
+    }
+
     const loop = () => {
       t++
-      if (mode === 'play') {
-        const dx = (keys.ArrowLeft ? -1 : 0) + (keys.ArrowRight ? 1 : 0) + steer
-        if (dx) {
-          player.vx += 0.15 * Math.sign(dx)
-          player.dir = Math.sign(dx)
-        }
-      } else if (mode === 'attract') demoAI()
+      // a few frames of freeze on a hit give it weight; everything still draws
+      const frozen = freeze > 0
+      if (frozen) freeze--
+      if (!frozen) {
+        if (mode === 'play') {
+          const dx = (keys.ArrowLeft ? -1 : 0) + (keys.ArrowRight ? 1 : 0) + steer
+          if (dx) {
+            player.vx += 0.15 * Math.sign(dx)
+            player.dir = Math.sign(dx)
+          }
+        } else if (mode === 'attract') demoAI()
 
-      if (mode !== 'over') {
-        physics(player)
-        for (const e of enemies) {
-          if (!e.alive) continue
-          enemyAI(e)
-          physics(e)
-        }
-        collide()
-        if (player.y > LAVA_Y) loseLife()
-        if (enemies.every((e) => !e.alive)) {
-          wave++
-          startWave()
+        if (mode !== 'over') {
+          physics(player)
+          for (const e of enemies) {
+            if (!e.alive) continue
+            enemyAI(e)
+            physics(e)
+          }
+          collide()
+          if (player.y > LAVA_Y) loseLife()
+          if (enemies.every((e) => !e.alive)) {
+            wave++
+            startWave()
+          }
         }
       }
 
-      b.drawImage(backdrop, 0, 0)
-      drawStars()
-      drawClouds()
-      drawBirds()
-      drawFalls()
+      // the camera eases after the hero; each scenery layer slides by a different amount for depth
+      camX += ((player.x - W / 2) * 0.16 - camX) * 0.04
+      const off = (f: number) => Math.max(-M, Math.min(M, Math.round(-camX * f * k)))
+      const offs = { sky: off(0.12), far: off(0.22), clouds: off(0.3), mid: off(0.36), near: off(0.55) }
+
+      drawLayer(backdrop, offs.sky)
+      shifted(offs.sky, drawStars)
+      drawLayer(farLayer, offs.far)
+      shifted(offs.far, drawBirds)
+      drawLayer(midLayer, offs.mid)
+      shifted(offs.clouds, drawClouds)
+      drawLayer(nearLayer, offs.near)
+      shifted(offs.near, drawFalls)
       b.drawImage(islands, 0, 0)
       drawCrystals()
       drawLava()
@@ -1696,17 +1913,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       enemies.forEach((e) => drawRider(e, false))
       drawRider(player, true)
       drawSparks()
+      drawPopups()
 
       const top = H * 0.2
       if (mode === 'play') {
         place(caption(`Score ${score}`, 17, 'left'), 32)
         place(caption(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, 17, 'right'), 32)
       } else if (mode === 'attract') {
-        const title = chrome('SkyRiders', 64)
-        place(title, top)
-        const swing = Math.floor(t / 30) % 2
-        glint(Math.round(LW / 2 + title.half - 6), X(top - 46), swing ? 3 : 2)
-        glint(Math.round(LW / 2 - title.half + 10), X(top - 6), swing ? 1 : 2)
+        drawLogo(top)
         place(caption('of the Velvet Sunset', 22), top + 36)
         if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 76)
       } else {
@@ -1714,9 +1928,18 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         place(caption(`Score ${score}  ·  tap or press SPACE`, 19), H * 0.38 + 46)
       }
 
-      // scale the little buffer up to the screen with hard, square pixels
+      // scale the little buffer up with hard square pixels; a shake moves it in whole pixels
+      const sx = shake > 0.5 ? Math.round((Math.random() - 0.5) * shake) * pixel : 0
+      const sy = shake > 0.5 ? Math.round((Math.random() - 0.5) * shake) * pixel : 0
+      shake *= 0.85
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      if (sx || sy) {
+        ctx.fillStyle = '#0d0221'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      }
       ctx.imageSmoothingEnabled = false
-      ctx.drawImage(buffer, 0, 0, LW * pixel, LH * pixel)
+      ctx.drawImage(buffer, sx, sy, LW * pixel, LH * pixel)
+      post(sx, sy, offs)
       raf = requestAnimationFrame(loop)
     }
 
