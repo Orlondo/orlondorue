@@ -4,12 +4,12 @@ import { useEffect, useRef } from 'react'
 // drawn as a 16-bit pixel-art piece. A hero on a winged horse battles sorcerers on griffins above a molten lake.
 // Whoever is higher when they meet wins. When nobody is playing it runs an attract mode where the hero flies itself.
 //
-// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 224 lines on a
+// How the 16-bit look works: everything is drawn into a small buffer at console resolution (224 lines on a
 // wide screen), then scaled up with hard square pixels. The scenery, islands, clouds, sprites and lettering are
 // painted once as shapes and then snapped to a fixed palette, with checkerboard dithering and one-pixel outlines.
 // Stars, lava, lavafalls, sparks and glints are drawn pixel by pixel every frame.
 // On top of that sit the touches a game made today would add: parallax scenery that slides as the hero moves,
-// bloom and pools of light at full screen resolution, slowly turning light shafts, a colour grade, screen shake,
+// bloom and pools of light (drawn at the same console resolution, so they stay chunky), slowly turning light shafts, a colour grade, screen shake,
 // a short freeze on hits, score popups and a shine sweeping across the logo.
 //
 // The game fills whatever box it is given. The game world is 500 units tall on wide screens and 400 units wide on
@@ -1268,9 +1268,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const cw = Math.max(1, rect.width)
       const ch = Math.max(1, rect.height)
       const wide = cw >= ch
-      pixel = Math.max(2, Math.round(wide ? ch / 224 : cw / 170))
-      LW = Math.ceil(cw / pixel)
-      LH = Math.ceil(ch / pixel)
+      // The game always draws at console resolution: 224 lines, like the Super Nintendo and Genesis, stretched
+      // sideways to fill a wide screen; a phone held upright gets the Super Nintendo's 256 pixels across.
+      // Everything, lighting included, is drawn at that size and the browser scales it up with hard pixels.
+      pixel = 1
+      LH = wide ? 224 : Math.round((256 * ch) / cw)
+      LW = wide ? Math.round((224 * cw) / ch) : 256
       if (wide) {
         H = 500
         W = Math.round((500 * LW) / LH)
@@ -1781,7 +1784,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       glint(Math.round(LW / 2 - title.half + 10), y + title.base - X(6), swing ? 1 : 2)
     }
 
-    // ---- the modern pass, at full screen resolution over the pixel art ----
+    // ---- the modern pass: lighting over the pixel art, at the same console resolution ----
     const post = (sx: number, sy: number, offs: { sky: number; near: number }) => {
       const S = pixel
       const fullW = LW * S
