@@ -27,7 +27,7 @@ const LINES = 168
 type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number }
 type Mode = 'attract' | 'play' | 'over'
 type Platform = { x: number; y: number; w: number; rocks: number[] }
-type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number }
+type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; g?: number }
 type Star = { x: number; y: number; phase: number; burst: boolean }
 type Frame = { img: HTMLCanvasElement; ox: number; oy: number }
 type Label = { img: HTMLCanvasElement; base: number; half: number }
@@ -1847,11 +1847,21 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let embers: Ember[] = []
     // Power-ups appear low, just above the lava between the lower islands: the best rewards sit near the danger.
     // A Dawn Shard (gold) wins every clash for a few seconds; a Ward (blue) is a shield that absorbs one hit.
-    type Power = { kind: 'dawn' | 'ward'; x: number; y: number; life: number }
+    type Power = { kind: 'dawn' | 'ward'; x: number; y: number; life: number; rest: number }
     let power: Power | null = null
-    let powerTimer = 360
+    // About every half minute, one bird leaves the far flocks and swoops toward the viewer, growing as it comes,
+    // crosses the battlefield carrying a glowing crystal in its talons, drops it, and flies on out of sight.
+    type Courier = { x: number; y: number; t: number; dir: number; kind: Power['kind']; dropX: number; dropped: boolean }
+    let courier: Courier | null = null
+    let courierTimer = 420
     let dawn = 0 // frames of Dawn Shard left
     let ward = false
+
+    // A body left behind by a death: `tumble` spins and falls out of the sky; `sink` goes down slowly into the
+    // lava, swallowed by the surface, with flames and steam rising off it.
+    type Body = { hero: boolean; dir: number; x: number; y: number; vx: number; vy: number; rot: number; vr: number; kind: 'tumble' | 'sink'; life: number }
+    let bodies: Body[] = []
+    let heroDown = 0 // frames until the hero comes back after a death
 
     const reset = () => {
       player = spawnHero()
@@ -1861,7 +1871,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       sparks = []
       embers = []
       power = null
-      powerTimer = 360
+      courier = null
+      courierTimer = 420
+      bodies = []
+      heroDown = 0
       dawn = 0
       ward = false
       startWave()
@@ -1913,20 +1926,52 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           burst(power.x, power.y, 24, power.kind === 'dawn' ? ['#fff6c8', '#ffc65c', '#ffffff'] : ['#9fdcff', '#5aa8ff', '#ffffff'], 2.6, 2.2)
           beep(990, 0.18, 'triangle')
           power = null
-          powerTimer = 600
         } else if (power.life <= 0) {
           power = null
-          powerTimer = 420
+        } else if (power.y < power.rest) {
+          // a dropped crystal drifts down, then hovers low above the lava
+          power.y = Math.min(power.rest, power.y + 0.9)
         }
-      } else if (--powerTimer <= 0) {
-        // somewhere low: between the two lower islands or out toward the edges, just above the lava
-        const spots = [0.06, 0.34, 0.5, 0.66, 0.94]
-        power = {
-          kind: Math.random() < 0.55 ? 'dawn' : 'ward',
-          x: spots[Math.floor(Math.random() * spots.length)] * W,
-          y: LAVA_Y - 34 - Math.random() * 30,
-          life: 600,
+      }
+      updateCourier()
+    }
+
+    const updateCourier = () => {
+      if (!courier) {
+        if (!power && --courierTimer <= 0) {
+          const dir = Math.random() < 0.5 ? 1 : -1
+          courier = {
+            x: (dir > 0 ? 0.15 + Math.random() * 0.2 : 0.65 + Math.random() * 0.2) * W,
+            y: H * (0.28 + Math.random() * 0.06),
+            t: 0,
+            dir,
+            kind: Math.random() < 0.55 ? 'dawn' : 'ward',
+            // drop over open air between the islands, so the crystal lands somewhere low and reachable
+            dropX: [0.34, 0.5, 0.66][Math.floor(Math.random() * 3)] * W,
+            dropped: false,
+          }
         }
+        return
+      }
+      const cr = courier
+      cr.t++
+      if (cr.t < 90) {
+        // the approach: out of the far sky toward us, dropping as it grows
+        cr.x += cr.dir * 0.8
+        cr.y += 0.9
+      } else {
+        // the pass: big and close, a fast sweep across the battlefield with a gentle rise and fall
+        cr.x += cr.dir * 3.2
+        cr.y += Math.sin(cr.t * 0.05) * 0.6
+        if (!cr.dropped && (cr.dir > 0 ? cr.x >= cr.dropX : cr.x <= cr.dropX)) {
+          cr.dropped = true
+          power = { kind: cr.kind, x: cr.x, y: cr.y + 10, life: 900, rest: LAVA_Y - 36 - Math.random() * 26 }
+          burst(cr.x, cr.y + 10, 10, cr.kind === 'dawn' ? ['#fff6c8', '#ffc65c'] : ['#9fdcff', '#d8fff4'], 1.5, 1.6)
+        }
+      }
+      if (cr.x < -80 || cr.x > W + 80) {
+        courier = null
+        courierTimer = 1500 + Math.floor(Math.random() * 600) // about every 30 seconds
       }
     }
     reset()
@@ -1983,19 +2028,88 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       player.dir = Math.sign(player.vx) || 1
     }
 
-    const loseLife = () => {
-      beep(80, 0.4, 'sawtooth')
-      shake = Math.max(shake, 9)
-      burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffc65c', '#ff5a1f', '#ffe08a'], 3.5, 3)
-      if (mode !== 'play') {
-        reset()
-        return
+    const float = (x: number, y: number, n: number, colors: string[], rise: number, spread: number, size = 1.6) => {
+      for (let i = 0; i < n; i++) {
+        const max = 30 + Math.random() * 30
+        sparks.push({
+          x: x + (Math.random() - 0.5) * spread,
+          y: y + (Math.random() - 0.5) * spread * 0.6,
+          vx: (Math.random() - 0.5) * 1.2,
+          vy: -rise * (0.4 + Math.random()),
+          life: max,
+          max,
+          color: colors[i % colors.length],
+          size,
+          g: -0.01,
+        })
       }
-      lives--
-      player = spawnHero()
+    }
+
+    // knocked out of the sky in a clash
+    const tumbleDeath = (r: Rider, hero: boolean, from: number) => {
+      bodies.push({ hero, dir: r.dir, x: r.x, y: r.y, vx: Math.sign(r.x - from || 1) * 2.2, vy: -3, rot: 0, vr: (Math.random() < 0.5 ? -1 : 1) * 0.18, kind: 'tumble', life: 200 })
+      if (hero) {
+        burst(r.x, r.y, 24, ['#ffffff', '#e2ddd2', '#c2b9a9'], 2.6, 2) // white feathers
+        burst(r.x, r.y, 14, ['#9fdcff', '#5aa8ff'], 3.4, 1.6) // a flash of blue
+      } else {
+        burst(r.x, r.y, 26, ['#94653a', '#c79c63', '#45291b', '#dcbc85'], 2.8, 2) // brown and gold feathers
+        float(r.x, r.y - 10, 18, ['#7fd6c2', '#4a1218', '#2f6a60', '#d8fff4'], 1.2, 12) // the sorcerer dissolving
+      }
+    }
+
+    // swallowed by the lava
+    const lavaDeath = (r: Rider, hero: boolean) => {
+      bodies.push({ hero, dir: r.dir, x: r.x, y: LAVA_Y - 10, vx: r.vx * 0.2, vy: 0, rot: 0, vr: 0, kind: 'sink', life: 90 })
+      const molten = ['#fff6c8', '#ffc65c', '#ff8a3d', '#ff5a1f']
+      for (let i = 0; i < 22; i++) {
+        const max = 25 + Math.random() * 25
+        sparks.push({ x: r.x + (Math.random() - 0.5) * 14, y: LAVA_Y - 2, vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 3.5, life: max, max, color: molten[i % 4], size: 2.4, g: 0.16 })
+      }
+    }
+
+    const updateBodies = () => {
+      for (const bd of bodies) {
+        bd.life--
+        if (bd.kind === 'tumble') {
+          bd.vy += 0.16
+          bd.x += bd.vx
+          bd.y += bd.vy
+          bd.rot += bd.vr
+          if (t % 4 === 0) float(bd.x, bd.y, 1, bd.hero ? ['#ffffff'] : ['#45291b', '#2e1d16'], 0.4, 6, 1.2)
+          if (bd.y > LAVA_Y) {
+            // it hits the lava and is gone in a splash
+            lavaDeath({ ...player, x: bd.x, vx: 0, dir: bd.dir }, bd.hero)
+            bodies[bodies.length - 1].life = 50
+            bd.life = 0
+          }
+        } else {
+          bd.y += 0.3
+          bd.x += bd.vx
+          // flames licking up and steam rising off it as it goes under
+          if (t % 2 === 0) float(bd.x, LAVA_Y - 2, 2, ['#ff8a3d', '#ffc65c', '#ff5a1f'], 1.4, 16, 1.8)
+          if (t % 5 === 0) float(bd.x, LAVA_Y - 6, 1, ['#d7c4ff', '#ffffff'], 0.8, 12, 2)
+        }
+      }
+      bodies = bodies.filter((bd) => bd.life > 0)
+    }
+
+    const loseLife = (cause: 'clash' | 'lava', from = player.x) => {
+      beep(cause === 'lava' ? 60 : 80, 0.45, 'sawtooth')
+      shake = Math.max(shake, cause === 'lava' ? 7 : 9)
+      freeze = cause === 'clash' ? 6 : 0
+      if (cause === 'lava') lavaDeath(player, true)
+      else tumbleDeath(player, true, from)
       dawn = 0
       ward = false
-      if (lives <= 0) mode = 'over'
+      heroDown = 100
+      if (mode === 'play') lives--
+    }
+
+    // when the hero's death has played out: back into the fight, game over, or (in the demo) start again
+    const heroReturns = () => {
+      if (mode !== 'play') reset()
+      else if (lives <= 0) mode = 'over'
+      else player = spawnHero()
     }
 
     const collide = () => {
@@ -2010,6 +2124,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           beep(110)
         } else if (dawn > 0 || player.y < e.y) {
           e.alive = false
+          tumbleDeath(e, false, player.x)
           embers.push({ x: e.x, y: e.y, vy: 1.8, t: 0, sunk: 0 })
           score += 500
           shake = Math.max(shake, 5)
@@ -2027,7 +2142,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           shake = Math.max(shake, 4)
           beep(300, 0.12, 'square')
         } else if (player.safe === 0) {
-          loseLife()
+          loseLife('clash', e.x)
           return
         }
       }
@@ -2091,7 +2206,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     const BIRD_LIFTS = [-7, -4, 0, 5, 2, -4]
     let birdFrames: HTMLCanvasElement[][] = []
     const makeBirds = () => {
-      birdFrames = [1.8, 2.6].map((size) =>
+      birdFrames = [1.8, 2.6, 3.4, 4.4, 5.4].map((size) =>
         [...BIRD_LIFTS, -1].map((lift) => {
           const sc = k * size * 0.9
           const cv = document.createElement('canvas')
@@ -2372,6 +2487,47 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
+    const drawBodies = () => {
+      for (const bd of bodies) {
+        const f = (bd.hero ? heroFrames : foeFrames)[0]
+        if (!f) continue
+        if (bd.kind === 'tumble' && bd.life < 30 && bd.life % 4 < 2) continue
+        b.save()
+        if (bd.kind === 'sink') {
+          // only the part still above the lava shows
+          b.beginPath()
+          b.rect(0, 0, LW, X(LAVA_Y) + 1)
+          b.clip()
+        }
+        b.imageSmoothingEnabled = false
+        b.translate(X(bd.x), X(bd.y))
+        if (bd.kind === 'tumble') b.rotate(Math.round(bd.rot / (Math.PI / 8)) * (Math.PI / 8)) // turn in chunky steps
+        b.scale(bd.dir, 1)
+        b.drawImage(f.img, -f.ox, -f.oy)
+        b.restore()
+      }
+    }
+
+    // the courier bird and the crystal it carries
+    const drawCourier = () => {
+      const cr = courier
+      if (!cr) return
+      const grow = Math.min(1, cr.t / 90)
+      const set = birdFrames[Math.min(birdFrames.length - 1, 1 + Math.floor(grow * 3.99))]
+      if (!set) return
+      const frame = set[Math.floor(t * 0.2) % BIRD_LIFTS.length]
+      const x = X(cr.x)
+      const y = X(cr.y)
+      b.drawImage(frame, x - Math.round(frame.width / 2), y - Math.round(frame.height / 2))
+      if (!cr.dropped && grow > 0.4) {
+        const [edge, face] = cr.kind === 'dawn' ? ['#ff8a3d', '#ffc65c'] : ['#2a6ad8', '#9fdcff']
+        b.fillStyle = edge
+        b.fillRect(x - 1, y + Math.round(frame.height / 2) - 1, 3, 4)
+        b.fillStyle = face
+        b.fillRect(x, y + Math.round(frame.height / 2), 1, 2)
+      }
+    }
+
     const drawRider = (r: Rider, hero: boolean) => {
       if (!r.alive) return
       if (hero && r.safe > 0 && Math.floor(t / 4) % 2) return // blink while protected after a respawn
@@ -2394,7 +2550,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       for (const s of sparks) {
         s.x += s.vx
         s.y += s.vy
-        s.vy += 0.08
+        s.vy += s.g ?? 0.08
         s.vx *= 0.97
         s.life--
         // sparks shrink, then blink out
@@ -2538,9 +2694,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
       for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
-      if (!(player.safe > 0 && Math.floor(t / 4) % 2))
+      if (heroDown === 0 && !(player.safe > 0 && Math.floor(t / 4) % 2))
         light(player.x, player.y - 4, dawn > 0 ? 22 : 16, dawn > 0 ? 'rgba(255,200,90,A)' : 'rgba(120,200,255,A)', dawn > 0 ? 0.4 : 0.28)
       for (const em of embers) if (em.sunk === 0) light(em.x, em.y, 8, 'rgba(127,214,194,A)', 0.35)
+      if (courier && !courier.dropped) light(courier.x, courier.y + 8, 10, courier.kind === 'dawn' ? 'rgba(255,198,92,A)' : 'rgba(90,168,255,A)', 0.3)
       if (power) light(power.x, power.y, 14, power.kind === 'dawn' ? 'rgba(255,198,92,A)' : 'rgba(90,168,255,A)', 0.35)
       const isle = platforms[2]
       if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
@@ -2569,17 +2726,28 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
             player.vx += 0.15 * Math.sign(dx)
             player.dir = Math.sign(dx)
           }
-        } else if (mode === 'attract') demoAI()
+        } else if (mode === 'attract' && heroDown === 0) demoAI()
 
+        updateBodies()
         if (mode !== 'over') {
-          physics(player)
+          if (heroDown === 0) physics(player)
           for (const e of enemies) {
             if (!e.alive) continue
             enemyAI(e)
             physics(e)
+            if (e.y > LAVA_Y) {
+              // a sorcerer that falls in burns, and its ember waits under the surface to bring it back
+              e.alive = false
+              lavaDeath(e, false)
+              embers.push({ x: e.x, y: LAVA_Y, vy: 0, t: 0, sunk: 140 })
+            }
           }
-          collide()
-          if (player.y > LAVA_Y) loseLife()
+          if (heroDown > 0) {
+            if (--heroDown === 0) heroReturns()
+          } else {
+            collide()
+            if (player.y > LAVA_Y) loseLife('lava')
+          }
           nextArrival()
           updateEmbers()
           updatePower()
@@ -2610,8 +2778,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       drawEmbers()
       drawPower()
       enemies.forEach((e) => drawRider(e, false))
-      drawAura()
-      drawRider(player, true)
+      drawBodies()
+      drawCourier()
+      if (heroDown === 0) {
+        drawAura()
+        drawRider(player, true)
+      }
       drawSparks()
       drawPopups()
 
