@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 // drawn as a 16-bit pixel-art piece. A hero on a winged horse battles sorcerers on griffins above a molten lake.
 // Whoever is higher when they meet wins. When nobody is playing it runs an attract mode where the hero flies itself.
 //
-// How the 16-bit look works: everything is drawn into a small buffer at console resolution (224 lines on a
+// How the 16-bit look works: everything is drawn into a small buffer at a low fixed resolution (LINES tall on a
 // wide screen), then scaled up with hard square pixels. The scenery, islands, clouds, sprites and lettering are
 // painted once as shapes and then snapped to a fixed palette, with checkerboard dithering and one-pixel outlines.
 // Stars, lava, lavafalls, sparks and glints are drawn pixel by pixel every frame.
@@ -17,7 +17,9 @@ import { useEffect, useRef } from 'react'
 
 const GRAVITY = 0.22
 const FLAP = -4.2
-const SPRITE_SCALE = 1.45
+const SPRITE_SCALE = 1.6
+// How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
+const LINES = 168
 
 type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number }
 type Mode = 'attract' | 'play' | 'over'
@@ -1199,7 +1201,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const cached = labels.get(key)
       if (cached) return cached
       if (labels.size > 40) labels.clear()
-      const px = Math.max(9, Math.round(size * k))
+      const px = Math.max(8, Math.round(size * k))
       const cv = document.createElement('canvas')
       cv.width = LW
       cv.height = Math.ceil(px * 1.9)
@@ -1251,11 +1253,13 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     // Smaller text with a dark outline so it reads over any part of the sky.
     const caption = (s: string, size: number, align: CanvasTextAlign = 'center') =>
       label(`caption|${s}|${size}|${align}`, size, (c, px, base) => {
-        c.font = `italic 700 ${px}px Georgia, serif`
+        // a plain bold face keeps its shape at only a handful of pixels tall, like console text
+        px = Math.max(10, px)
+        c.font = `bold ${px}px Verdana, 'Trebuchet MS', Arial, sans-serif`
         c.textAlign = align
         const x = align === 'left' ? 6 : align === 'right' ? LW - 6 : LW / 2
         c.lineJoin = 'round'
-        c.lineWidth = 3
+        c.lineWidth = 2
         c.strokeStyle = '#1a0629'
         c.strokeText(s, x, base)
         c.fillStyle = '#fff6c8'
@@ -1268,12 +1272,13 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const cw = Math.max(1, rect.width)
       const ch = Math.max(1, rect.height)
       const wide = cw >= ch
-      // The game always draws at console resolution: 224 lines, like the Super Nintendo and Genesis, stretched
-      // sideways to fill a wide screen; a phone held upright gets the Super Nintendo's 256 pixels across.
-      // Everything, lighting included, is drawn at that size and the browser scales it up with hard pixels.
+      // The game always draws at a low, fixed resolution (LINES tall), stretched sideways to fill a wide screen;
+      // a phone held upright gets the same pixel size across. Everything, lighting included, is drawn at that size
+      // and the browser scales it up with hard pixels.
       pixel = 1
-      LH = wide ? 224 : Math.round((256 * ch) / cw)
-      LW = wide ? Math.round((224 * cw) / ch) : 256
+      const across = Math.round(LINES * 1.1)
+      LH = wide ? LINES : Math.round((across * ch) / cw)
+      LW = wide ? Math.round((LINES * cw) / ch) : across
       if (wide) {
         H = 500
         W = Math.round((500 * LW) / LH)
@@ -1797,14 +1802,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           bloom.width = bw
           bloom.height = bh
         }
-        bl.filter = 'brightness(0.55) contrast(3.2) blur(1.5px)'
+        bl.filter = 'brightness(0.55) contrast(3.2) blur(1px)'
         bl.clearRect(0, 0, bw, bh)
         bl.drawImage(buffer, 0, 0, bw, bh)
         bl.filter = 'none'
         ctx.save()
         ctx.globalCompositeOperation = 'lighter'
         ctx.globalAlpha = 0.32
-        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingEnabled = false
         ctx.drawImage(bloom, sx, sy, fullW, fullH)
         ctx.restore()
       }
@@ -1924,8 +1929,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         place(caption(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, 17, 'right'), 32)
       } else if (mode === 'attract') {
         drawLogo(top)
-        place(caption('of the Velvet Sunset', 22), top + 36)
-        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 76)
+        place(caption('of the Velvet Sunset', 22), top + 40)
+        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 82)
       } else {
         place(chrome('Game Over', 56), H * 0.38)
         place(caption(`Score ${score}  ·  tap or press SPACE`, 19), H * 0.38 + 46)
