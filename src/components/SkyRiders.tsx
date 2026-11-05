@@ -24,7 +24,7 @@ const REACH = Math.round(22 * SPRITE_SCALE)
 // How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
 const LINES = 168
 
-type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number }
+type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number; dawn: number; ward: boolean }
 type Mode = 'attract' | 'play' | 'over'
 type Platform = { x: number; y: number; w: number; rocks: number[] }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; g?: number }
@@ -1812,6 +1812,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       alive: true,
       safe: 0,
       aim: H * (0.32 + Math.random() * 0.42),
+      dawn: 0,
+      ward: false,
     })
     const spawnHero = () => {
       const r = newRider(W / 2, H * 0.4)
@@ -1915,16 +1917,39 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       embers = embers.filter((em) => em.sunk !== -1 && !(em.sunk === 0 && em.y >= LAVA_Y))
     }
 
+    // Taking a power is a moment: the action holds and the power announces itself on whoever took it.
+    //   Dawn Shard: a pillar of golden light slams down, rays burst out, the rider flares gold and a golden
+    //   shockwave rolls across the sky.
+    //   Ward: six blue crystal shards fly in from all sides and lock into a ring; the rider flares blue as it
+    //   seals and a cold shockwave pulses outward.
+    type Rite = { kind: Power['kind']; who: Rider; t: number }
+    let rites: Rite[] = []
+    const chime = (notes: number[], type: OscillatorType) => notes.forEach((n, i) => window.setTimeout(() => beep(n, 0.16, type), i * 70))
+
+    const takePower = (who: Rider, hero: boolean, kind: Power['kind']) => {
+      if (hero) {
+        if (kind === 'dawn') dawn = 420
+        else ward = true
+      } else if (kind === 'dawn') who.dawn = 420
+      else who.ward = true
+      rites.push({ kind, who, t: 0 })
+      freeze = Math.max(freeze, kind === 'dawn' ? 12 : 8)
+      shake = Math.max(shake, kind === 'dawn' ? 5 : 3)
+      popups.push({ x: who.x, y: who.y - 26, text: hero ? (kind === 'dawn' ? 'DAWN SHARD' : 'WARD') : 'STOLEN', life: 70 })
+      if (kind === 'dawn') chime([523, 659, 784, 1047], 'triangle')
+      else chime([1318, 988, 784, 659], 'sine')
+    }
+
     const updatePower = () => {
       if (dawn > 0) dawn--
       if (power) {
         power.life--
-        if (Math.hypot(power.x - player.x, power.y - player.y) < REACH + 4) {
-          if (power.kind === 'dawn') dawn = 420
-          else ward = true
-          popups.push({ x: power.x, y: power.y - 14, text: power.kind === 'dawn' ? 'DAWN SHARD' : 'WARD', life: 70 })
-          burst(power.x, power.y, 24, power.kind === 'dawn' ? ['#fff6c8', '#ffc65c', '#ffffff'] : ['#9fdcff', '#5aa8ff', '#ffffff'], 2.6, 2.2)
-          beep(990, 0.18, 'triangle')
+        const taker =
+          heroDown === 0 && Math.hypot(power.x - player.x, power.y - player.y) < REACH + 4
+            ? player
+            : enemies.find((e) => e.alive && Math.hypot(power!.x - e.x, power!.y - e.y) < REACH + 4)
+        if (taker) {
+          takePower(taker, taker === player, power.kind)
           power = null
         } else if (power.life <= 0) {
           power = null
@@ -2006,7 +2031,30 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       if (r.safe > 0) r.safe--
     }
 
+    // the sorcerer nearest a crystal breaks off to go for it (less keenly in the demo)
+    const seeker = () => {
+      if (!power) return null
+      let best: Rider | null = null
+      let bestD = W * (mode === 'attract' ? 0.18 : 0.35)
+      for (const e of enemies) {
+        if (!e.alive) continue
+        const d = Math.hypot(e.x - power.x, e.y - power.y)
+        if (d < bestD) {
+          bestD = d
+          best = e
+        }
+      }
+      return best
+    }
+
     const enemyAI = (e: Rider) => {
+      if (e.dawn > 0) e.dawn--
+      if (power && seeker() === e) {
+        if (e.y > power.y - 4 && Math.random() < 0.09) flap(e)
+        e.vx += Math.sign(power.x - e.x) * 0.05
+        e.dir = Math.sign(e.vx) || 1
+        return
+      }
       // each sorcerer patrols at its own height and only climbs to strike when the hero comes close.
       // In attract mode they're half-hearted: they notice the hero later, chase lazily and don't fight for
       // the high ground, so the demo knight wins most of his clashes.
@@ -2136,14 +2184,27 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         if (!e.alive || Math.hypot(e.x - player.x, e.y - player.y) > REACH) continue
         // in attract mode the demo knight gets some slack: a clash he loses narrowly is a stand-off instead
         const even = mode === 'attract' ? player.y - e.y < 16 && e.y - player.y < 5 : Math.abs(e.y - player.y) < 5
-        if (dawn === 0 && even) {
+        // the Dawn Shard decides a clash outright; if both riders carry one, they cancel out
+        const heroDawn = dawn > 0
+        const foeDawn = e.dawn > 0
+        const heroWins = heroDawn !== foeDawn ? heroDawn : player.y < e.y && !even
+        if (heroWins && e.ward) {
+          // the sorcerer's Ward takes the blow and shatters
+          e.ward = false
+          e.vx = Math.sign(e.x - player.x) * 4
+          e.vy = -3
+          player.vx = -player.vx * 1.2 || -2
+          burst(e.x, e.y, 20, ['#9fdcff', '#5aa8ff', '#ffffff'], 3, 2)
+          shake = Math.max(shake, 4)
+          beep(300, 0.12, 'square')
+        } else if (heroDawn === foeDawn && even) {
           // dead even: both bounce off
           player.vx = -player.vx * 1.5 || -3
           e.vx = -e.vx * 1.5 || 3
           burst((e.x + player.x) / 2, (e.y + player.y) / 2, 8, ['#ffffff', '#9fdcff'], 2, 1.8)
           shake = Math.max(shake, 2)
           beep(110)
-        } else if (dawn > 0 || player.y < e.y) {
+        } else if (heroWins) {
           e.alive = false
           fallDeath(e, false, player.x)
           embers.push({ x: e.x, y: e.y, vy: 1.8, t: 0, sunk: 0 })
@@ -2536,10 +2597,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     // the hero's powers: a ring of blue for the Ward, a trail of gold sparks under the Dawn Shard
-    const drawAura = () => {
-      const x = X(player.x)
-      const y = X(player.y) - 1
-      if (ward) {
+    const drawAura = (r: Rider = player, hasWard = ward, dawnLeft = dawn) => {
+      const x = X(r.x)
+      const y = X(r.y) - 1
+      if (hasWard) {
         const r = Math.round(REACH * k * 0.75)
         b.fillStyle = (t >> 3) % 2 ? '#9fdcff' : '#5aa8ff'
         for (let a = 0; a < 16; a++) {
@@ -2548,10 +2609,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           b.fillRect(Math.round(x + Math.cos(ang) * r), Math.round(y + Math.sin(ang) * r * 0.8), 1, 1)
         }
       }
-      if (dawn > 0 && (dawn > 90 || (dawn >> 2) % 2) && t % 3 === 0) {
+      if (dawnLeft > 0 && (dawnLeft > 90 || (dawnLeft >> 2) % 2) && t % 3 === 0) {
         sparks.push({
-          x: player.x + (Math.random() - 0.5) * 16,
-          y: player.y + (Math.random() - 0.5) * 10,
+          x: r.x + (Math.random() - 0.5) * 16,
+          y: r.y + (Math.random() - 0.5) * 10,
           vx: (Math.random() - 0.5) * 0.6,
           vy: -0.6,
           life: 22,
@@ -2562,10 +2623,16 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    // a solid white copy of a sprite, for the flash at the moment a rider is struck
-    const flashes = new Map<HTMLCanvasElement, HTMLCanvasElement>()
-    const whiteOf = (img: HTMLCanvasElement) => {
-      let w = flashes.get(img)
+    // a solid single-colour copy of a sprite: white for the flash when a rider is struck, gold or blue when it
+    // takes a power
+    const flashes = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>()
+    const tintOf = (img: HTMLCanvasElement, colour: string) => {
+      let byColour = flashes.get(img)
+      if (!byColour) {
+        byColour = new Map()
+        flashes.set(img, byColour)
+      }
+      let w = byColour.get(colour)
       if (!w) {
         w = document.createElement('canvas')
         w.width = img.width
@@ -2574,12 +2641,86 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         if (c) {
           c.drawImage(img, 0, 0)
           c.globalCompositeOperation = 'source-in'
-          c.fillStyle = '#ffffff'
+          c.fillStyle = colour
           c.fillRect(0, 0, w.width, w.height)
         }
-        flashes.set(img, w)
+        byColour.set(colour, w)
       }
       return w
+    }
+    const whiteOf = (img: HTMLCanvasElement) => tintOf(img, '#ffffff')
+
+    // the colour a rider flares while a power announces itself on it
+    const flareOf = (r: Rider) => {
+      const rite = rites.find((ri) => ri.who === r)
+      if (!rite) return null
+      if (rite.kind === 'dawn' && rite.t < 16 && rite.t % 4 < 3) return '#ffe08a'
+      if (rite.kind === 'ward' && rite.t >= 18 && rite.t < 28 && rite.t % 4 < 3) return '#9fdcff'
+      return null
+    }
+
+    const ring = (x: number, y: number, r: number, colours: string[], dots: number, gap: number) => {
+      for (let a = 0; a < dots; a++) {
+        if (gap && a % gap === 0) continue
+        const ang = (a / dots) * Math.PI * 2
+        b.fillStyle = colours[a % colours.length]
+        b.fillRect(Math.round(x + Math.cos(ang) * r), Math.round(y + Math.sin(ang) * r * 0.85), 1, 1)
+      }
+    }
+
+    const drawRites = () => {
+      for (const ri of rites) {
+        ri.t++
+        const x = X(ri.who.x)
+        const y = X(ri.who.y)
+        if (ri.kind === 'dawn') {
+          // the pillar of light: wide and blinding as it strikes, narrowing as it fades
+          if (ri.t < 34) {
+            const half = Math.max(0, Math.round(5 - ri.t * 0.15))
+            for (let yy = 0; yy < y; yy++) {
+              b.fillStyle = '#ffc65c'
+              b.fillRect(x - half - 1, yy, 1, 1)
+              b.fillRect(x + half + 1, yy, 1, 1)
+              b.fillStyle = (yy + ri.t) % 3 ? '#fff6c8' : '#ffffff'
+              b.fillRect(x - half, yy, half * 2 + 1, 1)
+            }
+          }
+          // rays bursting outward from the rider
+          if (ri.t < 22) {
+            for (let r = 0; r < 12; r++) {
+              const ang = (r / 12) * Math.PI * 2 + 0.13
+              for (let d = 6 + ri.t; d < 10 + ri.t * 1.8; d++) {
+                b.fillStyle = d % 2 ? '#ffc65c' : '#fff6c8'
+                b.fillRect(Math.round(x + Math.cos(ang) * d), Math.round(y + Math.sin(ang) * d), 1, 1)
+              }
+            }
+          }
+          // the golden shockwave rolling out across the sky
+          if (ri.t > 6 && ri.t < 60) ring(x, y, (ri.t - 6) * 2.2, ['#ffe08a', '#ffc65c', '#ff8a3d'], 64, ri.t > 40 ? 2 : 0)
+        } else {
+          // six crystal shards flying in from all sides, then locking into a ring
+          const lock = Math.min(1, ri.t / 18)
+          const ease = 1 - (1 - lock) * (1 - lock)
+          const rad = 34 - 24 * ease
+          if (ri.t < 30) {
+            for (let i = 0; i < 6; i++) {
+              const ang = (i / 6) * Math.PI * 2 + (1 - ease) * 1.6
+              const sx = Math.round(x + Math.cos(ang) * rad)
+              const sy = Math.round(y + Math.sin(ang) * rad * 0.85)
+              b.fillStyle = '#2a6ad8'
+              b.fillRect(sx - 1, sy - 2, 3, 5)
+              b.fillStyle = '#9fdcff'
+              b.fillRect(sx, sy - 2, 1, 4)
+              b.fillStyle = '#ffffff'
+              b.fillRect(sx, sy - 1, 1, 1)
+            }
+          }
+          // the moment it seals: a bright ring, then a cold shockwave
+          if (ri.t >= 18 && ri.t < 26) ring(x, y, 10, ['#ffffff', '#9fdcff'], 40, 0)
+          if (ri.t >= 18 && ri.t < 56) ring(x, y, 10 + (ri.t - 18) * 2, ['#9fdcff', '#5aa8ff', '#2a6ad8'], 56, ri.t > 40 ? 2 : 0)
+        }
+      }
+      rites = rites.filter((ri) => ri.t < 60 && (ri.who === player ? heroDown === 0 : ri.who.alive))
     }
 
     const drawBodies = () => {
@@ -2622,10 +2763,11 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       if (hero && r.safe > 0 && Math.floor(t / 4) % 2) return // blink while protected after a respawn
       const frames = hero ? heroFrames : foeFrames
       const f = r.wing > 0 ? frames[0] : frames[1 + Math.floor(((Math.sin(t * 0.12 + r.x * 0.02) + 1) / 2) * 2.999)]
+      const flare = flareOf(r)
       b.save()
       b.translate(X(r.x), X(r.y))
       b.scale(r.dir, 1)
-      b.drawImage(f.img, -f.ox, -f.oy)
+      b.drawImage(flare ? tintOf(f.img, flare) : f.img, -f.ox, -f.oy)
       b.restore()
       // a glint running along the hero's sword, and a pulse on each sorcerer's orb
       if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 30 * SPRITE_SCALE), X(r.y - 19 * SPRITE_SCALE), 2)
@@ -2782,6 +2924,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
       for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
+      for (const e of enemies) if (e.alive && e.dawn > 0) light(e.x, e.y - 4, 20, 'rgba(255,200,90,A)', 0.35)
+      for (const ri of rites) {
+        if (ri.t < 12) {
+          ctx.fillStyle = ri.kind === 'dawn' ? `rgba(255,214,140,${0.22 * (1 - ri.t / 12)})` : `rgba(140,200,255,${0.16 * (1 - ri.t / 12)})`
+          ctx.fillRect(sx, sy, fullW, fullH)
+        }
+        if (ri.kind === 'dawn' && ri.t < 34) light(ri.who.x, ri.who.y, 30, 'rgba(255,214,140,A)', 0.5 * (1 - ri.t / 34))
+      }
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
       if (heroDown === 0 && !(player.safe > 0 && Math.floor(t / 4) % 2))
         light(player.x, player.y - 4, dawn > 0 ? 22 : 16, dawn > 0 ? 'rgba(255,200,90,A)' : 'rgba(120,200,255,A)', dawn > 0 ? 0.4 : 0.28)
@@ -2873,6 +3023,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         drawAura()
         drawRider(player, true)
       }
+      for (const e of enemies) if (e.alive && (e.dawn > 0 || e.ward)) drawAura(e, e.ward, e.dawn)
+      drawRites()
       drawSparks()
       drawPopups()
 
