@@ -17,7 +17,10 @@ import { useEffect, useRef } from 'react'
 
 const GRAVITY = 0.22
 const FLAP = -4.2
-const SPRITE_SCALE = 1.9
+const SPRITE_SCALE = 1.35
+// where a rider's hooves or paws are, and how close two riders must be to clash, both follow the drawn size
+const FOOT = Math.round(17 * SPRITE_SCALE)
+const REACH = Math.round(22 * SPRITE_SCALE)
 // How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
 const LINES = 168
 
@@ -1692,8 +1695,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         r.vy = 1
       }
       for (const p of platforms) {
-        if (r.vy > 0 && r.x > p.x && r.x < p.x + p.w && r.y + 14 > p.y && r.y + 14 < p.y + 12) {
-          r.y = p.y - 14
+        if (r.vy > 0 && r.x > p.x && r.x < p.x + p.w && r.y + FOOT > p.y && r.y + FOOT < p.y + 12) {
+          r.y = p.y - FOOT
           r.vy = 0
         }
       }
@@ -1732,7 +1735,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const collide = () => {
       for (const e of enemies) {
-        if (!e.alive || Math.hypot(e.x - player.x, e.y - player.y) > 30) continue
+        if (!e.alive || Math.hypot(e.x - player.x, e.y - player.y) > REACH) continue
         if (Math.abs(e.y - player.y) < 5) {
           // dead even: both bounce off
           player.vx = -player.vx * 1.5 || -3
