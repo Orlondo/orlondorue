@@ -183,6 +183,50 @@ const finishSprite = (cv: HTMLCanvasElement, rim: string, edge: string) => {
   g.putImageData(img, 0, 0)
 }
 
+// A tiny pixel font, five pixels tall, for the small print on the attract screen.
+const PIXEL_FONT: Record<string, string[]> = {
+  A: ['.#.', '#.#', '###', '#.#', '#.#'],
+  B: ['##.', '#.#', '##.', '#.#', '##.'],
+  C: ['.##', '#..', '#..', '#..', '.##'],
+  D: ['##.', '#.#', '#.#', '#.#', '##.'],
+  E: ['###', '#..', '##.', '#..', '###'],
+  F: ['###', '#..', '##.', '#..', '#..'],
+  G: ['.##', '#..', '#.#', '#.#', '.##'],
+  H: ['#.#', '#.#', '###', '#.#', '#.#'],
+  I: ['###', '.#.', '.#.', '.#.', '###'],
+  J: ['..#', '..#', '..#', '#.#', '.#.'],
+  K: ['#.#', '#.#', '##.', '#.#', '#.#'],
+  L: ['#..', '#..', '#..', '#..', '###'],
+  M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'],
+  N: ['#..#', '##.#', '#.##', '#..#', '#..#'],
+  O: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  P: ['##.', '#.#', '##.', '#..', '#..'],
+  Q: ['.#.', '#.#', '#.#', '##.', '.##'],
+  R: ['##.', '#.#', '##.', '#.#', '#.#'],
+  S: ['.##', '#..', '.#.', '..#', '##.'],
+  T: ['###', '.#.', '.#.', '.#.', '.#.'],
+  U: ['#.#', '#.#', '#.#', '#.#', '###'],
+  V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
+  W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'],
+  X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+  Y: ['#.#', '#.#', '.#.', '.#.', '.#.'],
+  Z: ['###', '..#', '.#.', '#..', '###'],
+  '0': ['###', '#.#', '#.#', '#.#', '###'],
+  '1': ['.#.', '##.', '.#.', '.#.', '###'],
+  '2': ['##.', '..#', '.#.', '#..', '###'],
+  '3': ['##.', '..#', '.#.', '..#', '##.'],
+  '4': ['#.#', '#.#', '###', '..#', '..#'],
+  '5': ['###', '#..', '##.', '..#', '##.'],
+  '6': ['.##', '#..', '###', '#.#', '###'],
+  '7': ['###', '..#', '.#.', '.#.', '.#.'],
+  '8': ['###', '#.#', '###', '#.#', '###'],
+  '9': ['###', '#.#', '###', '..#', '##.'],
+  ',': ['..', '..', '..', '..', '.#', '#.'], // its tail drops below the line
+  '(': ['.#', '#.', '#.', '#.', '.#'],
+  ')': ['#.', '.#', '.#', '.#', '#.'],
+  ' ': ['..', '..', '..', '..', '..'],
+}
+
 // Repeatable pseudo-random numbers, so the scenery looks the same on every visit.
 const seeded = (seed: number) => () => {
   seed = (seed * 16807) % 2147483647
@@ -1626,45 +1670,41 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       return made
     }
 
-    // A centred line of small capitals that can change colour part-way, shrinking to fit a narrow screen.
-    const credit = (parts: [string, string][], size: number): Label => {
-      const key = `credit|${parts.map((p) => p.join(':')).join('|')}|${size}`
+    // A centred line of tiny pixel capitals (a hand-made 5-pixel-tall font, like arcade lettering) that can
+    // change colour part-way, with a dark outline so it reads over anything.
+    const credit = (parts: [string, string][]): Label => {
+      const key = `credit|${parts.map((p) => p.join(':')).join('|')}`
       const cached = labels.get(key)
       if (cached) return cached
-      const face = (n: number) => `bold ${n}px Verdana, 'Trebuchet MS', Arial, sans-serif`
-      const probe = document.createElement('canvas').getContext('2d')
-      let px = Math.max(8, Math.round(size * k))
-      const text = parts.map(([s]) => s).join('')
-      if (probe) {
-        probe.font = face(px)
-        while (px > 6 && probe.measureText(text).width > LW - 10) {
-          px--
-          probe.font = face(px)
-        }
-      }
+      const glyphs = parts.flatMap(([str, colour]) => [...str.toUpperCase()].map((ch) => ({ g: PIXEL_FONT[ch] ?? PIXEL_FONT[' '], colour })))
+      const width = glyphs.reduce((w, { g }) => w + g[0].length + 1, -1)
       const cv = document.createElement('canvas')
       cv.width = LW
-      cv.height = Math.ceil(px * 1.4)
-      const base = Math.round(px * 1.12)
+      cv.height = 9
       const c = cv.getContext('2d')
-      let half = 0
       if (c) {
-        c.font = face(px)
-        c.textAlign = 'left'
-        c.lineJoin = 'round'
-        half = c.measureText(text).width / 2
-        let x = LW / 2 - half
-        for (const [s, colour] of parts) {
-          c.strokeStyle = '#0d0221'
-          c.lineWidth = 2
-          c.strokeText(s, x, base)
-          c.fillStyle = colour
-          c.fillText(s, x, base)
-          x += c.measureText(s).width
+        const x0 = Math.round((LW - width) / 2)
+        // the outline first, then the letters on top
+        for (const pass of [0, 1]) {
+          let x = x0
+          for (const { g, colour } of glyphs) {
+            g.forEach((row, ry) => {
+              ;[...row].forEach((cell, rx) => {
+                if (cell !== '#') return
+                if (pass === 0) {
+                  c.fillStyle = '#0d0221'
+                  c.fillRect(x + rx - 1, 2 + ry - 1, 3, 3)
+                } else {
+                  c.fillStyle = colour
+                  c.fillRect(x + rx, 2 + ry, 1, 1)
+                }
+              })
+            })
+            x += g[0].length + 1
+          }
         }
       }
-      quantize(cv, 0, false)
-      const made = { img: cv, base, half }
+      const made = { img: cv, base: 7, half: width / 2 }
       labels.set(key, made)
       return made
     }
@@ -2970,25 +3010,15 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     // up out of the lava so the small lettering reads.
     const drawCredits = () => {
       const lines: (Label | null)[] = [
-        Math.floor(t / 40) % 2 ? credit([['PRESS SPACE OR TAP TO RIDE', '#fff6c8']], 18) : null,
-        credit(
-          [
-            ['PRESENTED BY ', '#7fd6c2'],
-            ['ORLONDO RUE', '#ffc65c'],
-          ],
-          15,
-        ),
-        credit(
-          [
-            ['BONUS RIDER EVERY ', '#ffc65c'],
-            ['20,000', '#d7c4ff'],
-            [' POINTS', '#ffc65c'],
-          ],
-          15,
-        ),
-        credit([[`\u00A9 ${new Date().getFullYear()} ORLONDO RUE`, '#a98cf0']], 15),
+        Math.floor(t / 40) % 2 ? credit([['PRESS SPACE OR TAP TO RIDE', '#fff6c8']]) : null,
+        credit([
+          ['BONUS RIDER EVERY ', '#ffc65c'],
+          ['20,000', '#d7c4ff'],
+          [' POINTS', '#ffc65c'],
+        ]),
+        credit([[`(C) ${new Date().getFullYear()} ORLONDO RUE`, '#a98cf0']]),
       ]
-      const ref = credit([['PRESENTED BY ', '#7fd6c2']], 15)
+      const ref = credit([['BONUS', '#ffc65c']])
       const step = ref.img.height
       const bottom = LH - 2
       const topOfBlock = bottom - step * lines.length
