@@ -15,6 +15,9 @@ import { useEffect, useRef } from 'react'
 // The game fills whatever box it is given. The game world is 500 units tall on wide screens and 400 units wide on
 // tall ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
 
+// The game's version, shown small in the bottom-right corner of the attract screen. Bump it with each release.
+const VERSION = '1.0'
+
 const GRAVITY = 0.22
 const FLAP = -4.2
 const SPRITE_SCALE = 0.75
@@ -225,6 +228,7 @@ const PIXEL_FONT: Record<string, string[]> = {
   '(': ['.#', '#.', '#.', '#.', '.#'],
   ')': ['#.', '.#', '.#', '.#', '#.'],
   ' ': ['..', '..', '..', '..', '..'],
+  '.': ['.', '.', '.', '.', '#'],
 }
 
 // Repeatable pseudo-random numbers, so the scenery looks the same on every visit.
@@ -1672,8 +1676,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // A centred line of tiny pixel capitals (a hand-made 5-pixel-tall font, like arcade lettering) that can
     // change colour part-way, with a dark outline so it reads over anything.
-    const credit = (parts: [string, string][]): Label => {
-      const key = `credit|${parts.map((p) => p.join(':')).join('|')}`
+    const credit = (parts: [string, string][], align: 'center' | 'right' = 'center'): Label => {
+      const key = `credit|${align}|${parts.map((p) => p.join(':')).join('|')}`
       const cached = labels.get(key)
       if (cached) return cached
       const glyphs = parts.flatMap(([str, colour]) => [...str.toUpperCase()].map((ch) => ({ g: PIXEL_FONT[ch] ?? PIXEL_FONT[' '], colour })))
@@ -1683,7 +1687,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       cv.height = 9
       const c = cv.getContext('2d')
       if (c) {
-        const x0 = Math.round((LW - width) / 2)
+        const x0 = align === 'right' ? LW - width - 4 : Math.round((LW - width) / 2)
         // the outline first, then the letters on top
         for (const pass of [0, 1]) {
           let x = x0
@@ -3006,6 +3010,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const place = (l: Label, worldY: number) => b.drawImage(l.img, 0, X(worldY) - l.base)
 
+    // the version, tucked into the bottom-right corner
+    const drawVersion = () => {
+      const v = credit([[`V${VERSION}`, '#8a4f9e']], 'right')
+      b.drawImage(v.img, 0, LH - v.img.height - 1)
+    }
+
     // The bottom of the attract screen: the prompt to play, then the credits, over a dark band that fades
     // up out of the lava so the small lettering reads.
     const drawCredits = () => {
@@ -3035,6 +3045,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         if (!l) return
         b.drawImage(l.img, 0, topOfBlock + step * i)
       })
+      drawVersion()
     }
 
     // the logo's shine is composed on its own small canvas each frame
