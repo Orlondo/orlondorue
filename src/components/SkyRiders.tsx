@@ -24,7 +24,7 @@ const REACH = Math.round(22 * SPRITE_SCALE)
 // How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
 const LINES = 168
 
-type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number }
+type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number }
 type Mode = 'attract' | 'play' | 'over'
 type Platform = { x: number; y: number; w: number; rocks: number[] }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number }
@@ -1801,7 +1801,18 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    const newRider = (x: number, y: number): Rider => ({ x, y, vx: 0, vy: 0, dir: 1, wing: 0, alive: true, safe: 0 })
+    // `aim` is the height a rider likes to cruise at; enemies spread across the lower sky instead of crowding the top
+    const newRider = (x: number, y: number): Rider => ({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      dir: 1,
+      wing: 0,
+      alive: true,
+      safe: 0,
+      aim: H * (0.32 + Math.random() * 0.42),
+    })
     const spawnHero = () => {
       const r = newRider(W / 2, H * 0.4)
       r.safe = 90
@@ -1830,13 +1841,93 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       burst(x, 30, 16, ['#7fd6c2', '#d8fff4', '#4a1218'], 2, 2)
       arrivalTimer = Math.max(45, 120 - wave * 10)
     }
+    // Soul embers: a defeated sorcerer leaves a glowing ember that sinks slowly toward the lava. Catch it for
+    // points; if it reaches the lava, the sorcerer is reborn from the flames and climbs back into the fight.
+    type Ember = { x: number; y: number; vy: number; t: number; sunk: number }
+    let embers: Ember[] = []
+    // Power-ups appear low, just above the lava between the lower islands: the best rewards sit near the danger.
+    // A Dawn Shard (gold) wins every clash for a few seconds; a Ward (blue) is a shield that absorbs one hit.
+    type Power = { kind: 'dawn' | 'ward'; x: number; y: number; life: number }
+    let power: Power | null = null
+    let powerTimer = 360
+    let dawn = 0 // frames of Dawn Shard left
+    let ward = false
+
     const reset = () => {
       player = spawnHero()
       score = 0
       lives = 3
       wave = 1
       sparks = []
+      embers = []
+      power = null
+      powerTimer = 360
+      dawn = 0
+      ward = false
       startWave()
+    }
+
+    const updateEmbers = () => {
+      for (const em of embers) {
+        em.t++
+        if (em.sunk > 0) {
+          // sunk: after a moment the sorcerer rises again out of the lava where it fell
+          if (--em.sunk === 0) {
+            const e = newRider(em.x, LAVA_Y - 6)
+            e.vy = FLAP * 1.6
+            e.dir = em.x < player.x ? 1 : -1
+            enemies.push(e)
+            burst(em.x, LAVA_Y, 26, ['#ff8a3d', '#ffc65c', '#7fd6c2'], 3, 2.4)
+            shake = Math.max(shake, 3)
+            beep(90, 0.3, 'sawtooth')
+          }
+          continue
+        }
+        // it drops away quickly at first, then sinks slowly, and can only be caught once it's out of reach
+        em.vy = Math.max(0.45, em.vy * 0.97)
+        em.y += em.vy
+        em.x += Math.sin(em.t * 0.05) * 0.4
+        if (em.t > 40 && Math.hypot(em.x - player.x, em.y - player.y) < REACH) {
+          score += 250
+          popups.push({ x: em.x, y: em.y - 12, text: '+250', life: 50 })
+          burst(em.x, em.y, 14, ['#d8fff4', '#7fd6c2', '#ffffff'], 2, 1.8)
+          beep(880, 0.08, 'triangle')
+          em.sunk = -1
+        } else if (em.y >= LAVA_Y) {
+          em.y = LAVA_Y
+          em.sunk = 110
+          burst(em.x, LAVA_Y, 8, ['#ff8a3d', '#ffc65c'], 1.5, 1.6)
+        }
+      }
+      embers = embers.filter((em) => em.sunk !== -1 && !(em.sunk === 0 && em.y >= LAVA_Y))
+    }
+
+    const updatePower = () => {
+      if (dawn > 0) dawn--
+      if (power) {
+        power.life--
+        if (Math.hypot(power.x - player.x, power.y - player.y) < REACH + 4) {
+          if (power.kind === 'dawn') dawn = 420
+          else ward = true
+          popups.push({ x: power.x, y: power.y - 14, text: power.kind === 'dawn' ? 'DAWN SHARD' : 'WARD', life: 70 })
+          burst(power.x, power.y, 24, power.kind === 'dawn' ? ['#fff6c8', '#ffc65c', '#ffffff'] : ['#9fdcff', '#5aa8ff', '#ffffff'], 2.6, 2.2)
+          beep(990, 0.18, 'triangle')
+          power = null
+          powerTimer = 600
+        } else if (power.life <= 0) {
+          power = null
+          powerTimer = 420
+        }
+      } else if (--powerTimer <= 0) {
+        // somewhere low: between the two lower islands or out toward the edges, just above the lava
+        const spots = [0.06, 0.34, 0.5, 0.66, 0.94]
+        power = {
+          kind: Math.random() < 0.55 ? 'dawn' : 'ward',
+          x: spots[Math.floor(Math.random() * spots.length)] * W,
+          y: LAVA_Y - 34 - Math.random() * 30,
+          life: 600,
+        }
+      }
     }
     reset()
 
@@ -1871,18 +1962,24 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     const enemyAI = (e: Rider) => {
-      const target = Math.min(player.y - 20, LAVA_Y - 80)
+      // each sorcerer patrols at its own height and only climbs to strike when the hero comes close
+      const near = Math.abs(player.x - e.x) < W * 0.2
+      const target = near ? Math.min(player.y - 20, LAVA_Y - 70) : Math.min(e.aim, LAVA_Y - 60)
       if (e.y > target && Math.random() < 0.08) flap(e)
-      e.vx += Math.sign(player.x - e.x) * 0.05
+      e.vx += Math.sign(player.x - e.x) * (near ? 0.05 : 0.025)
       e.dir = Math.sign(e.vx) || 1
     }
 
     // The hero flies itself in attract mode: get above the nearest sorcerer, then dive on them.
     const demoAI = () => {
+      // chase a falling ember first, then a power-up, otherwise get above the nearest sorcerer and dive
+      const ember = embers.find((em) => em.sunk === 0)
+      const target = ember ? { x: ember.x, y: ember.y + 6 } : power ? { x: power.x, y: power.y } : null
       const foe = enemies.find((e) => e.alive)
-      if (!foe) return
-      if ((player.y > foe.y - 25 || player.y > LAVA_Y - 70) && Math.random() < 0.14) flap(player)
-      player.vx += Math.sign(foe.x - player.x) * 0.08
+      if (!target && !foe) return
+      const aim = target ?? { x: foe!.x, y: foe!.y - 25 }
+      if ((player.y > aim.y || player.y > LAVA_Y - 45) && Math.random() < 0.14) flap(player)
+      player.vx += Math.sign(aim.x - player.x) * 0.08
       player.dir = Math.sign(player.vx) || 1
     }
 
@@ -1896,27 +1993,39 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
       lives--
       player = spawnHero()
+      dawn = 0
+      ward = false
       if (lives <= 0) mode = 'over'
     }
 
     const collide = () => {
       for (const e of enemies) {
         if (!e.alive || Math.hypot(e.x - player.x, e.y - player.y) > REACH) continue
-        if (Math.abs(e.y - player.y) < 5) {
+        if (dawn === 0 && Math.abs(e.y - player.y) < 5) {
           // dead even: both bounce off
           player.vx = -player.vx * 1.5 || -3
           e.vx = -e.vx * 1.5 || 3
           burst((e.x + player.x) / 2, (e.y + player.y) / 2, 8, ['#ffffff', '#9fdcff'], 2, 1.8)
           shake = Math.max(shake, 2)
           beep(110)
-        } else if (player.y < e.y) {
+        } else if (dawn > 0 || player.y < e.y) {
           e.alive = false
+          embers.push({ x: e.x, y: e.y, vy: 1.8, t: 0, sunk: 0 })
           score += 500
           shake = Math.max(shake, 5)
           freeze = 4
           popups.push({ x: e.x, y: e.y - 20, text: '+500', life: 55 })
           burst(e.x, e.y, 30, ['#ffe08a', '#d7c4ff', '#a98cf0', '#ffffff'], 3.2, 2.6)
           beep(660, 0.15, 'triangle')
+        } else if (player.safe === 0 && ward) {
+          // the Ward takes the blow and shatters
+          ward = false
+          player.safe = 60
+          e.vx = Math.sign(e.x - player.x) * 4
+          e.vy = -3
+          burst(player.x, player.y, 20, ['#9fdcff', '#5aa8ff', '#ffffff'], 3, 2)
+          shake = Math.max(shake, 4)
+          beep(300, 0.12, 'square')
         } else if (player.safe === 0) {
           loseLife()
           return
@@ -2193,6 +2302,76 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
+    // a soul ember: a teal flame flickering as it sinks, or a fading glow on the lava where it went under
+    const drawEmbers = () => {
+      for (const em of embers) {
+        const x = X(em.x)
+        const y = X(em.y)
+        if (em.sunk > 0) {
+          if ((em.sunk >> 3) % 2) {
+            b.fillStyle = '#7fd6c2'
+            b.fillRect(x - 1, y - 1, 3, 1)
+          }
+          continue
+        }
+        const flick = (em.t >> 2) % 3
+        b.fillStyle = '#2f6a60'
+        b.fillRect(x - 1, y - 2 - flick, 3, 1)
+        b.fillStyle = '#7fd6c2'
+        b.fillRect(x - 1, y - 1, 3, 3)
+        b.fillRect(x, y - 2 - (flick ? 1 : 0), 1, 1)
+        b.fillStyle = '#d8fff4'
+        b.fillRect(x, y, 1, 1)
+      }
+    }
+
+    // a power-up: a slowly turning crystal, gold for the Dawn Shard, blue for the Ward
+    const drawPower = () => {
+      if (!power) return
+      if (power.life < 120 && (power.life >> 2) % 2) return // blink before it fades away
+      const x = X(power.x)
+      const y = X(power.y) + Math.round(Math.sin(t * 0.08) * 1.5)
+      const [edge, face, core] = power.kind === 'dawn' ? ['#ff8a3d', '#ffc65c', '#fff6c8'] : ['#2a6ad8', '#5aa8ff', '#d8fff4']
+      const turn = (t >> 3) % 4
+      const w = [2, 1, 2, 3][turn]
+      b.fillStyle = edge
+      b.fillRect(x - w - 1, y - 1, w * 2 + 3, 3)
+      b.fillRect(x - 1, y - 5, 3, 11)
+      b.fillStyle = face
+      b.fillRect(x - w, y - 1, w * 2 + 1, 3)
+      b.fillRect(x, y - 4, 1, 9)
+      b.fillStyle = core
+      b.fillRect(x, y - 1, 1, 2)
+      if ((t >> 4) % 2) glint(x + 2, y - 4, 1)
+    }
+
+    // the hero's powers: a ring of blue for the Ward, a trail of gold sparks under the Dawn Shard
+    const drawAura = () => {
+      const x = X(player.x)
+      const y = X(player.y) - 1
+      if (ward) {
+        const r = Math.round(REACH * k * 0.75)
+        b.fillStyle = (t >> 3) % 2 ? '#9fdcff' : '#5aa8ff'
+        for (let a = 0; a < 16; a++) {
+          if ((a + (t >> 2)) % 4 === 0) continue
+          const ang = (a / 16) * Math.PI * 2
+          b.fillRect(Math.round(x + Math.cos(ang) * r), Math.round(y + Math.sin(ang) * r * 0.8), 1, 1)
+        }
+      }
+      if (dawn > 0 && (dawn > 90 || (dawn >> 2) % 2) && t % 3 === 0) {
+        sparks.push({
+          x: player.x + (Math.random() - 0.5) * 16,
+          y: player.y + (Math.random() - 0.5) * 10,
+          vx: (Math.random() - 0.5) * 0.6,
+          vy: -0.6,
+          life: 22,
+          max: 22,
+          color: Math.random() < 0.5 ? '#ffc65c' : '#fff6c8',
+          size: 1.5,
+        })
+      }
+    }
+
     const drawRider = (r: Rider, hero: boolean) => {
       if (!r.alive) return
       if (hero && r.safe > 0 && Math.floor(t / 4) % 2) return // blink while protected after a respawn
@@ -2359,7 +2538,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
       for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
-      if (!(player.safe > 0 && Math.floor(t / 4) % 2)) light(player.x, player.y - 4, 16, 'rgba(120,200,255,A)', 0.28)
+      if (!(player.safe > 0 && Math.floor(t / 4) % 2))
+        light(player.x, player.y - 4, dawn > 0 ? 22 : 16, dawn > 0 ? 'rgba(255,200,90,A)' : 'rgba(120,200,255,A)', dawn > 0 ? 0.4 : 0.28)
+      for (const em of embers) if (em.sunk === 0) light(em.x, em.y, 8, 'rgba(127,214,194,A)', 0.35)
+      if (power) light(power.x, power.y, 14, power.kind === 'dawn' ? 'rgba(255,198,92,A)' : 'rgba(90,168,255,A)', 0.35)
       const isle = platforms[2]
       if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
       ctx.restore()
@@ -2399,7 +2581,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           collide()
           if (player.y > LAVA_Y) loseLife()
           nextArrival()
-          if (!arrivals.length && enemies.every((e) => !e.alive)) {
+          updateEmbers()
+          updatePower()
+          if (!arrivals.length && !embers.length && enemies.every((e) => !e.alive)) {
             wave++
             startWave()
           }
@@ -2423,7 +2607,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       drawCrystals()
       drawLava()
       drawIslandFall()
+      drawEmbers()
+      drawPower()
       enemies.forEach((e) => drawRider(e, false))
+      drawAura()
       drawRider(player, true)
       drawSparks()
       drawPopups()
