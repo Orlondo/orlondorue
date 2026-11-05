@@ -24,7 +24,8 @@ const REACH = Math.round(22 * SPRITE_SCALE)
 // How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
 const LINES = 168
 
-type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number; dawn: number; ward: boolean }
+type Trace = { x: number; y: number; dir: number; img: HTMLCanvasElement; ox: number; oy: number }
+type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number; aim: number; dawn: number; ward: boolean; trail: Trace[] }
 type Mode = 'attract' | 'play' | 'over'
 type Platform = { x: number; y: number; w: number; rocks: number[] }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number; g?: number }
@@ -1814,6 +1815,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       aim: H * (0.32 + Math.random() * 0.42),
       dawn: 0,
       ward: false,
+      trail: [],
     })
     const spawnHero = () => {
       const r = newRider(W / 2, H * 0.4)
@@ -2598,28 +2600,28 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // the hero's powers: a ring of blue for the Ward, a trail of gold sparks under the Dawn Shard
     const drawAura = (r: Rider = player, hasWard = ward, dawnLeft = dawn) => {
-      const x = X(r.x)
-      const y = X(r.y) - 1
-      if (hasWard) {
-        const r = Math.round(REACH * k * 0.75)
-        b.fillStyle = (t >> 3) % 2 ? '#9fdcff' : '#5aa8ff'
-        for (let a = 0; a < 16; a++) {
-          if ((a + (t >> 2)) % 4 === 0) continue
-          const ang = (a / 16) * Math.PI * 2
-          b.fillRect(Math.round(x + Math.cos(ang) * r), Math.round(y + Math.sin(ang) * r * 0.8), 1, 1)
+      const fading = dawnLeft > 0 && dawnLeft < 90 && (dawnLeft >> 2) % 2 === 1
+      if (dawnLeft > 0 && !fading) {
+        // flames licking up off the wings and back, and hot embers thrown off behind
+        for (let i = 0; i < 2; i++) {
+          const max = 18 + Math.random() * 14
+          sparks.push({
+            x: r.x - r.dir * (4 + Math.random() * 14),
+            y: r.y - 6 - Math.random() * 12,
+            vx: -r.dir * 0.4 + (Math.random() - 0.5) * 0.5,
+            vy: -0.8 - Math.random() * 0.8,
+            life: max,
+            max,
+            color: ['#fff6c8', '#ffe08a', '#ffc65c', '#ff8a3d'][Math.floor(Math.random() * 4)],
+            size: 1.6,
+            g: -0.02,
+          })
         }
       }
-      if (dawnLeft > 0 && (dawnLeft > 90 || (dawnLeft >> 2) % 2) && t % 3 === 0) {
-        sparks.push({
-          x: r.x + (Math.random() - 0.5) * 16,
-          y: r.y + (Math.random() - 0.5) * 10,
-          vx: (Math.random() - 0.5) * 0.6,
-          vy: -0.6,
-          life: 22,
-          max: 22,
-          color: Math.random() < 0.5 ? '#ffc65c' : '#fff6c8',
-          size: 1.5,
-        })
+      if (hasWard && t % 4 === 0) {
+        // frost motes drifting down off the crystal
+        const max = 40
+        sparks.push({ x: r.x + (Math.random() - 0.5) * 22, y: r.y + (Math.random() - 0.5) * 14, vx: (Math.random() - 0.5) * 0.3, vy: 0.3, life: max, max, color: Math.random() < 0.5 ? '#d8fff4' : '#9fdcff', size: 1.2, g: 0.004 })
       }
     }
 
@@ -2649,6 +2651,110 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       return w
     }
     const whiteOf = (img: HTMLCanvasElement) => tintOf(img, '#ffffff')
+
+    // The powered-up looks, made from each sprite frame: the Dawn Shard turns rider and mount to molten gold,
+    // white-hot along the top; the Ward turns them to clear blue crystal, with bright facets catching the light.
+    const forms = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>()
+    const formOf = (img: HTMLCanvasElement, kind: Power['kind']) => {
+      let byKind = forms.get(img)
+      if (!byKind) {
+        byKind = new Map()
+        forms.set(img, byKind)
+      }
+      let cv = byKind.get(kind)
+      if (cv) return cv
+      cv = document.createElement('canvas')
+      cv.width = img.width
+      cv.height = img.height
+      const c = cv.getContext('2d')
+      if (c) {
+        c.drawImage(img, 0, 0)
+        // recolour, keeping all the shading
+        c.globalCompositeOperation = 'color'
+        c.fillStyle = kind === 'dawn' ? '#ffb030' : '#4a9cff'
+        c.fillRect(0, 0, cv.width, cv.height)
+        // light from above
+        c.globalCompositeOperation = 'source-atop'
+        const g = c.createLinearGradient(0, 0, 0, cv.height)
+        if (kind === 'dawn') {
+          g.addColorStop(0, 'rgba(255,255,230,0.75)')
+          g.addColorStop(0.45, 'rgba(255,220,120,0.25)')
+          g.addColorStop(1, 'rgba(255,90,20,0.3)')
+        } else {
+          g.addColorStop(0, 'rgba(230,255,255,0.6)')
+          g.addColorStop(0.5, 'rgba(160,220,255,0.15)')
+          g.addColorStop(1, 'rgba(20,60,160,0.3)')
+        }
+        c.fillStyle = g
+        c.fillRect(0, 0, cv.width, cv.height)
+        if (kind === 'ward') {
+          // crystal facets: thin bright diagonals across the body
+          c.fillStyle = 'rgba(255,255,255,0.45)'
+          for (let x = -cv.height; x < cv.width; x += 5) {
+            for (let y = 0; y < cv.height; y++) c.fillRect(x + y, y, 1, 1)
+          }
+        }
+        // put the original shape back as the mask
+        c.globalCompositeOperation = 'destination-in'
+        c.drawImage(img, 0, 0)
+      }
+      byKind.set(kind, cv)
+      return cv
+    }
+
+    // which form a rider is in right now (flickering back to normal as a Dawn Shard runs out)
+    const formFor = (r: Rider, hero: boolean): Power['kind'] | null => {
+      const d = hero ? dawn : r.dawn
+      const w = hero ? ward : r.ward
+      if (d > 0 && !(d < 90 && (d >> 2) % 2)) return 'dawn'
+      if (w) return 'ward'
+      return null
+    }
+
+    // the Dawn Shard's crown of sunrays, turning slowly behind the rider
+    const drawCrown = (x: number, y: number) => {
+      const spin = t * 0.01
+      for (let i = 0; i < 14; i++) {
+        const ang = spin + (i / 14) * Math.PI * 2
+        const len = 9 + ((i + (t >> 3)) % 3) * 3
+        for (let d = 7; d < 7 + len; d++) {
+          b.fillStyle = d > 7 + len - 3 ? '#ff8a3d' : d % 2 ? '#ffc65c' : '#ffe08a'
+          b.fillRect(Math.round(x + Math.cos(ang) * d), Math.round(y + Math.sin(ang) * d * 0.85), 1, 1)
+        }
+      }
+    }
+
+    // the Ward's crystal shell: a turning hexagon with glinting corners, and three shards in orbit
+    const drawShell = (x: number, y: number) => {
+      const rad = 13
+      const turn = t * 0.012
+      const corners = Array.from({ length: 6 }, (_, i) => {
+        const a = turn + (i / 6) * Math.PI * 2
+        return [x + Math.cos(a) * rad, y + Math.sin(a) * rad * 0.85] as [number, number]
+      })
+      corners.forEach(([x0, y0], i) => {
+        const [x1, y1] = corners[(i + 1) % 6]
+        const steps = 10
+        for (let s2 = 0; s2 <= steps; s2++) {
+          if ((s2 + (t >> 3)) % 4 === 0) continue
+          b.fillStyle = s2 % 2 ? '#9fdcff' : '#5aa8ff'
+          b.fillRect(Math.round(x0 + ((x1 - x0) * s2) / steps), Math.round(y0 + ((y1 - y0) * s2) / steps), 1, 1)
+        }
+        if ((i + (t >> 4)) % 3 === 0) {
+          b.fillStyle = '#ffffff'
+          b.fillRect(Math.round(x0), Math.round(y0), 1, 1)
+        }
+      })
+      for (let i = 0; i < 3; i++) {
+        const a = -t * 0.05 + (i / 3) * Math.PI * 2
+        const sx = Math.round(x + Math.cos(a) * 17)
+        const sy = Math.round(y + Math.sin(a) * 7)
+        b.fillStyle = '#2a6ad8'
+        b.fillRect(sx - 1, sy - 2, 3, 4)
+        b.fillStyle = '#d8fff4'
+        b.fillRect(sx, sy - 2, 1, 3)
+      }
+    }
 
     // the colour a rider flares while a power announces itself on it
     const flareOf = (r: Rider) => {
@@ -2764,11 +2870,31 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const frames = hero ? heroFrames : foeFrames
       const f = r.wing > 0 ? frames[0] : frames[1 + Math.floor(((Math.sin(t * 0.12 + r.x * 0.02) + 1) / 2) * 2.999)]
       const flare = flareOf(r)
+      const form = formFor(r, hero)
+      const x = X(r.x)
+      const y = X(r.y)
+      if (form === 'dawn') {
+        drawCrown(x, y - 2)
+        // golden afterimages streaming behind
+        r.trail.forEach((tr, i) => {
+          b.save()
+          b.globalAlpha = 0.12 + i * 0.08
+          b.translate(X(tr.x), X(tr.y))
+          b.scale(tr.dir, 1)
+          b.drawImage(tintOf(tr.img, '#ffc65c'), -tr.ox, -tr.oy)
+          b.restore()
+        })
+      }
+      if (t % 3 === 0) {
+        r.trail.push({ x: r.x, y: r.y, dir: r.dir, img: f.img, ox: f.ox, oy: f.oy })
+        if (r.trail.length > 4) r.trail.shift()
+      }
       b.save()
-      b.translate(X(r.x), X(r.y))
+      b.translate(x, y)
       b.scale(r.dir, 1)
-      b.drawImage(flare ? tintOf(f.img, flare) : f.img, -f.ox, -f.oy)
+      b.drawImage(flare ? tintOf(f.img, flare) : form ? formOf(f.img, form) : f.img, -f.ox, -f.oy)
       b.restore()
+      if (form === 'ward') drawShell(x, y - 2)
       // a glint running along the hero's sword, and a pulse on each sorcerer's orb
       if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 30 * SPRITE_SCALE), X(r.y - 19 * SPRITE_SCALE), 2)
       if (!hero && Math.sin(t * 0.15 + r.x) > 0.6) {
@@ -2924,7 +3050,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
       for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
-      for (const e of enemies) if (e.alive && e.dawn > 0) light(e.x, e.y - 4, 20, 'rgba(255,200,90,A)', 0.35)
+      for (const e of enemies) if (e.alive && e.dawn > 0) light(e.x, e.y - 4, 30, 'rgba(255,200,90,A)', 0.5)
+      for (const e of enemies) if (e.alive && e.ward && e.dawn === 0) light(e.x, e.y - 4, 22, 'rgba(120,200,255,A)', 0.35)
       for (const ri of rites) {
         if (ri.t < 12) {
           ctx.fillStyle = ri.kind === 'dawn' ? `rgba(255,214,140,${0.22 * (1 - ri.t / 12)})` : `rgba(140,200,255,${0.16 * (1 - ri.t / 12)})`
@@ -2934,13 +3061,25 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
       if (heroDown === 0 && !(player.safe > 0 && Math.floor(t / 4) % 2))
-        light(player.x, player.y - 4, dawn > 0 ? 22 : 16, dawn > 0 ? 'rgba(255,200,90,A)' : 'rgba(120,200,255,A)', dawn > 0 ? 0.4 : 0.28)
+        light(player.x, player.y - 4, dawn > 0 ? 32 : ward ? 24 : 16, dawn > 0 ? 'rgba(255,200,90,A)' : 'rgba(120,200,255,A)', dawn > 0 ? 0.55 : ward ? 0.4 : 0.28)
       for (const em of embers) if (em.sunk === 0) light(em.x, em.y, 8, 'rgba(127,214,194,A)', 0.35)
       if (courier && !courier.dropped) light(courier.x, courier.y + 8, 10, courier.kind === 'dawn' ? 'rgba(255,198,92,A)' : 'rgba(90,168,255,A)', 0.3)
       if (power) light(power.x, power.y, 14, power.kind === 'dawn' ? 'rgba(255,198,92,A)' : 'rgba(90,168,255,A)', 0.35)
       const isle = platforms[2]
       if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
       ctx.restore()
+      // while the hero holds a power, the edges of the screen burn gold (Dawn Shard) or take on a cold rim (Ward)
+      if (heroDown === 0 && (dawn > 0 || ward)) {
+        const hot = dawn > 0
+        const strength = hot ? 0.16 + Math.sin(t * 0.12) * 0.05 : 0.1
+        const cx = fullW / 2 + sx
+        const cy = fullH / 2 + sy
+        const v = ctx.createRadialGradient(cx, cy, Math.min(fullW, fullH) * 0.35, cx, cy, Math.max(fullW, fullH) * 0.75)
+        v.addColorStop(0, 'rgba(0,0,0,0)')
+        v.addColorStop(1, hot ? `rgba(255,170,60,${strength})` : `rgba(120,190,255,${strength})`)
+        ctx.fillStyle = v
+        ctx.fillRect(sx, sy, fullW, fullH)
+      }
       // a cinematic grade: cool sky, warm ground
       ctx.save()
       ctx.globalCompositeOperation = 'soft-light'
