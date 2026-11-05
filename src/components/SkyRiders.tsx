@@ -126,6 +126,28 @@ const seeded = (seed: number) => () => {
   return (seed - 1) / 2147483646
 }
 
+// A natural ridgeline by midpoint displacement: n + 1 heights from 0 to 1, rougher as `rough` rises.
+const ridgeLine = (seed: number, n: number, rough: number) => {
+  const r = seeded(seed)
+  const a = new Array<number>(n + 1).fill(0)
+  a[0] = r()
+  a[n] = r()
+  let step = n
+  let amp = 1
+  while (step > 1) {
+    const half = step / 2
+    for (let i = half; i < n; i += step) a[i] = (a[i - half] + a[i + half]) / 2 + (r() - 0.5) * amp
+    amp *= rough
+    step = half
+  }
+  const lo = Math.min(...a)
+  const hi = Math.max(...a)
+  return a.map((v) => (v - lo) / (hi - lo || 1))
+}
+
+const mix = (a: number[], b: number[], f: number) => a.map((v, i) => Math.round(v + (b[i] - v) * f))
+const css = (c: number[]) => `rgb(${c[0]},${c[1]},${c[2]})`
+
 const linear = (c: Draw, y0: number, y1: number, stops: [number, string][]) => {
   const g = c.createLinearGradient(0, y0, 0, y1)
   for (const [at, col] of stops) g.addColorStop(at, col)
@@ -194,19 +216,37 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.lineTo(15, 12 - gallop)
   c.lineTo(19, 13 - gallop)
   c.stroke()
-  // body with a sheen on the shoulder and shade on the belly
-  c.fillStyle = linear(c, -6, 12, [
+  // body: a rounded rump, a dipped back, a deep chest and a tucked belly
+  c.fillStyle = linear(c, -7, 12, [
     [0, '#ffffff'],
-    [0.55, '#e8dcc8'],
+    [0.5, '#e8dcc8'],
     [1, '#a98cf0'],
   ])
   c.beginPath()
-  c.ellipse(0, 3, 17, 8.5, 0, 0, Math.PI * 2)
+  c.moveTo(-17, 3)
+  c.bezierCurveTo(-18, -6, -9, -7, -1, -5)
+  c.bezierCurveTo(5, -4, 9, -6, 13, -2)
+  c.bezierCurveTo(17, 3, 14, 10, 8, 10)
+  c.bezierCurveTo(2, 12, -6, 12, -10, 10)
+  c.bezierCurveTo(-15, 9, -17, 7, -17, 3)
+  c.closePath()
   c.fill()
-  c.fillStyle = 'rgba(255,255,255,0.9)'
+  // muscle: light on the haunch and shoulder, a shadow line along the belly and behind the shoulder
+  c.fillStyle = 'rgba(255,255,255,0.85)'
   c.beginPath()
-  c.ellipse(7, 0, 6, 3, -0.3, 0, Math.PI * 2)
+  c.ellipse(-10, -1, 5, 3.4, -0.2, 0, Math.PI * 2)
+  c.ellipse(7, 0, 4.5, 3, -0.4, 0, Math.PI * 2)
   c.fill()
+  c.strokeStyle = 'rgba(138,79,158,0.55)'
+  c.lineWidth = 1.3
+  c.beginPath()
+  c.moveTo(-9, 9)
+  c.quadraticCurveTo(0, 11, 7, 8)
+  c.moveTo(2, -3)
+  c.quadraticCurveTo(1, 3, 3, 8)
+  c.moveTo(-5, -4)
+  c.quadraticCurveTo(-7, 2, -12, 6)
+  c.stroke()
   // neck and head
   c.fillStyle = linear(c, -16, 6, [
     [0, '#ffffff'],
@@ -373,8 +413,27 @@ const drawFoe = (c: Draw, lift: number) => {
     [1, '#6b3d1c'],
   ])
   c.beginPath()
-  c.ellipse(0, 3, 16, 8.5, 0, 0, Math.PI * 2)
+  c.moveTo(-16, 3)
+  c.bezierCurveTo(-17, -5, -8, -7, 0, -5)
+  c.bezierCurveTo(6, -4, 12, -5, 15, 0)
+  c.bezierCurveTo(16, 6, 12, 10, 6, 10)
+  c.bezierCurveTo(0, 12, -7, 12, -11, 10)
+  c.bezierCurveTo(-15, 9, -16, 7, -16, 3)
+  c.closePath()
   c.fill()
+  c.fillStyle = 'rgba(255,214,140,0.7)'
+  c.beginPath()
+  c.ellipse(-9, -1, 4.5, 3, -0.2, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = 'rgba(74,31,16,0.6)'
+  c.lineWidth = 1.3
+  c.beginPath()
+  c.moveTo(-9, 9)
+  c.quadraticCurveTo(-1, 11, 5, 8)
+  c.moveTo(-4, -4)
+  c.quadraticCurveTo(-6, 2, -11, 6)
+  c.stroke()
+  // a feathered chest, scalloped
   c.fillStyle = '#e8dcc8'
   c.beginPath()
   c.ellipse(11, 2, 7, 6.5, 0, 0, Math.PI * 2)
@@ -695,111 +754,152 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         c.fill()
       }
 
-      // mountain ranges: a lit side facing the sun, a shaded side away from it, rock streaks and a glowing rim
+      // small far-off islands drifting in the haze, each with a thread of falling mist
+      for (const [fx, fy, size] of [
+        [0.3, 0.42, 26],
+        [0.66, 0.36, 18],
+        [0.1, 0.5, 14],
+      ]) {
+        const ix = fx * W
+        const iy = Math.min(fy * H, horizon - 150)
+        c.fillStyle = '#8e2a7e'
+        c.beginPath()
+        c.moveTo(ix - size, iy)
+        c.lineTo(ix + size, iy)
+        c.lineTo(ix + size * 0.35, iy + size * 0.8)
+        c.lineTo(ix - size * 0.1, iy + size * 1.2)
+        c.lineTo(ix - size * 0.5, iy + size * 0.6)
+        c.closePath()
+        c.fill()
+        c.fillStyle = '#c46a8a'
+        c.fillRect(ix - size, iy - 2, size * 2, 3)
+        // a tiny tree line on top
+        c.fillStyle = '#7a52b8'
+        for (let tx = ix - size * 0.8; tx < ix + size * 0.8; tx += 5) {
+          c.beginPath()
+          c.moveTo(tx - 2, iy - 1)
+          c.lineTo(tx, iy - 5 - ((tx * 7) % 3))
+          c.lineTo(tx + 2, iy - 1)
+          c.fill()
+        }
+        const mist = c.createLinearGradient(0, iy, 0, iy + size * 3)
+        mist.addColorStop(0, 'rgba(255,235,245,0.55)')
+        mist.addColorStop(1, 'rgba(255,235,245,0)')
+        c.fillStyle = mist
+        c.fillRect(ix + size * 0.5, iy, 2.5, size * 3)
+      }
+
+      // mountain ranges with natural, eroded ridgelines. Every column is lit by how much its slope faces the
+      // sun, roughened with a little noise for gullies, then faded into the haze the further away the range is.
       const range = (
         seed: number,
         base: number,
         height: number,
-        step: number,
-        colours: { top: string; low: string; shade: string; rim: string; streak?: string },
+        rough: number,
+        colours: { lit: string; shade: string; low: string; fog: string; fogAmount: number; rim?: string },
       ) => {
-        const r = seeded(seed)
-        const pts: [number, number][] = []
-        let i = 0
-        for (let x = -step; x <= W + step; x += step / 2, i++) {
-          const peak = i % 2 === 0
-          pts.push([x + (r() - 0.5) * step * 0.3, base - height * (peak ? 0.55 + r() * 0.45 : 0.25 + r() * 0.3)])
+        const line = ridgeLine(seed, 256, rough)
+        const noise = seeded(seed + 100)
+        const ridgeAt = (x: number) => {
+          const f = Math.max(0, Math.min(1, x / W)) * 256
+          const i = Math.min(255, Math.floor(f))
+          const u = f - i
+          return base - height * (line[i] * (1 - u) + line[i + 1] * u)
         }
-        c.fillStyle = linear(c, base - height, base, [
-          [0, colours.top],
-          [1, colours.low],
-        ])
-        c.beginPath()
-        c.moveTo(-step, H)
-        for (const [x, y] of pts) c.lineTo(x, y)
-        c.lineTo(W + step, H)
-        c.closePath()
-        c.fill()
-        for (let j = 0; j < pts.length; j += 2) {
-          const [x, y] = pts[j]
-          // the side facing away from the sun falls into shadow
-          const away = x < W / 2 ? pts[j - 1] : pts[j + 1]
-          if (!away) continue
-          c.fillStyle = colours.shade
-          c.beginPath()
-          c.moveTo(x, y)
-          c.lineTo(away[0], away[1])
-          c.lineTo(away[0], H)
-          c.lineTo(x, H)
-          c.closePath()
-          c.fill()
-          if (colours.streak) {
-            c.strokeStyle = colours.streak
-            c.lineWidth = 1 / k
-            for (let s = 0; s < 3; s++) {
-              const sx = x + (r() - 0.5) * step * 0.4
-              const sy = y + 6 + r() * 10
-              c.beginPath()
-              c.moveTo(sx, sy)
-              c.lineTo(sx + (r() - 0.5) * 14, sy + 14 + r() * 22)
-              c.stroke()
-            }
+        const lit = rgb(colours.lit)
+        const shade = rgb(colours.shade)
+        const low = rgb(colours.low)
+        const fog = rgb(colours.fog)
+        const step = 1 / k
+        let gully = 0
+        for (let x = 0; x < W + step; x += step) {
+          const y = ridgeAt(x)
+          const slope = (ridgeAt(x + step * 5) - ridgeAt(x - step * 5)) / (step * 10)
+          const facing = x < sunX ? slope : -slope
+          gully = gully * 0.9 + (noise() - 0.5) * 0.06
+          const light = Math.max(0, Math.min(1, 0.45 + facing * 1.2 + gully))
+          const top = mix(mix(shade, lit, light), fog, colours.fogAmount)
+          const bottom = mix(low, fog, colours.fogAmount * 0.6)
+          const g = c.createLinearGradient(0, y, 0, base + 20)
+          g.addColorStop(0, css(top))
+          g.addColorStop(0.45, css(mix(top, bottom, 0.6)))
+          g.addColorStop(1, css(bottom))
+          c.fillStyle = g
+          c.fillRect(x, y, step + 0.05, H - y)
+          // a glowing rim where the ridge catches the sunset
+          if (colours.rim && facing > 0.08) {
+            c.fillStyle = colours.rim
+            c.fillRect(x, y, step + 0.05, step)
           }
         }
-        c.strokeStyle = colours.rim
-        c.lineWidth = 1.4 / k
-        c.beginPath()
-        pts.forEach(([x, y], j) => (j ? c.lineTo(x, y) : c.moveTo(x, y)))
-        c.stroke()
-        return pts
+        return ridgeAt
       }
-      const farthest = range(2, horizon - 4, 125, 130, { top: '#c46a8a', low: '#e8506a', shade: 'rgba(160,90,152,0.35)', rim: '#ffc65c' })
+      const farthest = range(2, horizon - 4, 120, 0.52, {
+        lit: '#ff8a3d',
+        shade: '#a05a98',
+        low: '#e8506a',
+        fog: '#e8506a',
+        fogAmount: 0.5,
+        rim: '#ffe08a',
+      })
 
-      // a castle on the far ridge, its towers lit by the sunset
+      // a castle on the far ridge, its towers catching the last light
       const castleX = W * 0.86
-      let ridge = horizon
-      for (let j = 1; j < farthest.length; j++) {
-        const [x0, y0] = farthest[j - 1]
-        const [x1, y1] = farthest[j]
-        if (castleX >= x0 && castleX <= x1) ridge = y0 + ((castleX - x0) / (x1 - x0)) * (y1 - y0)
-      }
+      const ridge = farthest(castleX) + 3
       const towers: [number, number, number][] = [
-        [-16, 26, 6],
-        [-6, 40, 7],
-        [5, 32, 6],
-        [14, 22, 5],
+        [-18, 24, 6],
+        [-8, 40, 7],
+        [3, 32, 6],
+        [12, 46, 5],
+        [20, 20, 5],
       ]
       c.fillStyle = '#a05a98'
-      c.fillRect(castleX - 18, ridge - 14, 36, 18)
+      c.fillRect(castleX - 22, ridge - 14, 46, 18)
+      for (let bx = castleX - 22; bx < castleX + 24; bx += 4) c.fillRect(bx, ridge - 17, 2, 3)
       for (const [dx, h, w] of towers) {
         c.fillStyle = '#a05a98'
         c.fillRect(castleX + dx - w / 2, ridge - h, w, h)
+        c.fillStyle = 'rgba(255,198,92,0.5)'
+        c.fillRect(castleX + dx - w / 2, ridge - h, w * 0.35, h)
         c.fillStyle = '#8e2a7e'
         c.beginPath()
         c.moveTo(castleX + dx - w / 2 - 1.5, ridge - h)
-        c.lineTo(castleX + dx, ridge - h - w * 1.6)
+        c.lineTo(castleX + dx, ridge - h - w * 1.8)
         c.lineTo(castleX + dx + w / 2 + 1.5, ridge - h)
         c.fill()
       }
 
-      range(4, horizon + 8, 95, 90, {
-        top: '#8a4f9e',
-        low: '#b03a86',
-        shade: 'rgba(78,26,114,0.45)',
+      // a band of low mist lying between the far and middle ranges
+      const mistBand = c.createLinearGradient(0, horizon - 70, 0, horizon + 10)
+      mistBand.addColorStop(0, 'rgba(255,157,200,0)')
+      mistBand.addColorStop(0.6, 'rgba(255,170,200,0.45)')
+      mistBand.addColorStop(1, 'rgba(255,170,200,0)')
+      c.fillStyle = mistBand
+      c.fillRect(0, horizon - 70, W, 80)
+
+      range(4, horizon + 10, 95, 0.5, {
+        lit: '#e8506a',
+        shade: '#6a2a86',
+        low: '#4e1a72',
+        fog: '#b03a86',
+        fogAmount: 0.22,
         rim: '#ff8a3d',
-        streak: 'rgba(78,26,114,0.6)',
       })
-      const near = range(6, LAVA_Y + 6, 68, 70, {
-        top: '#3b0f5c',
+      const nearRidge = range(6, LAVA_Y + 6, 70, 0.5, {
+        lit: '#b03a86',
+        shade: '#2b0a4a',
         low: '#1a0629',
-        shade: 'rgba(13,2,33,0.5)',
+        fog: '#1a0629',
+        fogAmount: 0,
         rim: '#ff6f5a',
-        streak: 'rgba(106,42,134,0.8)',
       })
 
-      // lavafalls pour from two clefts in the near range (drawn each frame, so just remember where)
-      const clefts = near.filter((_, j) => j % 2 === 1).filter(([x]) => x > W * 0.12 && x < W * 0.88 && Math.abs(x - W / 2) > W * 0.08)
-      falls = [clefts[1], clefts[clefts.length - 2]].filter(Boolean).map(([x, y]) => ({ x, top: y }))
+      // lavafalls pour from the lowest clefts in the near range (drawn each frame, so just remember where)
+      falls = [0.28, 0.72].map((fx) => {
+        let best = fx * W
+        for (let x = (fx - 0.07) * W; x < (fx + 0.07) * W; x += 2) if (nearRidge(x) > nearRidge(best)) best = x
+        return { x: best, top: nearRidge(best) + 2 }
+      })
 
       // dark spires rising from the lava at both edges, lit from below
       for (const side of [0, 1]) {
@@ -865,8 +965,11 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       for (const [dx, h] of towers) {
         for (let wy = 0; wy < 2; wy++) c.fillRect(X(castleX + dx), X(ridge - h + 6 + wy * 10), 1, 1)
       }
-      c.fillRect(X(castleX - 10), X(ridge - 7), 1, 1)
-      c.fillRect(X(castleX + 9), X(ridge - 7), 1, 1)
+      c.fillRect(X(castleX - 12), X(ridge - 7), 1, 1)
+      c.fillRect(X(castleX + 8), X(ridge - 7), 1, 1)
+      // pennants on the two tallest spires
+      c.fillStyle = '#ff3b6b'
+      for (const [dx, h, w] of towers.filter(([, h]) => h >= 40)) c.fillRect(X(castleX + dx), X(ridge - h - w * 1.8) - 2, 2, 1)
     }
 
     // ---- floating islands, painted as their own layer so the clouds can drift behind them ----
@@ -877,16 +980,16 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       c.setTransform(k, 0, 0, k, 0, 0)
       for (const p of platforms) {
         const r = seeded(Math.round(p.x * 13 + p.y))
-        const depth = 34
-        // the rock outline: a jagged wedge hanging below the top
-        const rock: [number, number][] = [[p.x - 2, p.y + 6]]
-        const n = p.rocks.length
-        for (let i = 0; i < n; i++) {
-          const fx = (i + 0.5) / n
-          const centre = 1 - Math.abs(fx - 0.5) * 2
-          rock.push([p.x + fx * p.w, p.y + 9 + (depth - 9) * centre * (0.45 + p.rocks[i] * 0.55)])
+        const depth = 40
+        // the rock outline: an eroded, uneven wedge hanging below the top
+        const edge = ridgeLine(Math.round(p.x + p.y * 7), 32, 0.6)
+        const rock: [number, number][] = [[p.x - 3, p.y + 6]]
+        for (let i = 0; i <= 32; i++) {
+          const fx = i / 32
+          const centre = Math.pow(1 - Math.abs(fx - 0.5) * 2, 0.8)
+          rock.push([p.x - 3 + fx * (p.w + 6), p.y + 8 + (depth - 8) * centre * (0.35 + edge[i] * 0.65)])
         }
-        rock.push([p.x + p.w + 2, p.y + 6])
+        rock.push([p.x + p.w + 3, p.y + 6])
         c.save()
         c.beginPath()
         rock.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
@@ -912,17 +1015,31 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           c.lineTo(x + (r() - 0.5) * 10, p.y + 16 + r() * 10)
           c.stroke()
         }
-        // sunset light catching the side facing the sun
-        c.fillStyle = 'rgba(255,138,61,0.35)'
-        const lit = p.x + p.w / 2 < W / 2 ? p.x + p.w * 0.6 : p.x
-        c.fillRect(lit, p.y + 6, p.w * 0.4, depth)
+        // pebbles and pits in the rock face
+        for (let i = 0; i < p.w / 4; i++) {
+          c.fillStyle = r() < 0.5 ? 'rgba(26,6,41,0.45)' : 'rgba(215,196,255,0.25)'
+          c.fillRect(p.x + r() * p.w, p.y + 9 + r() * (depth - 10), 1.6 / k, 1.2 / k)
+        }
+        // sunset light catching the side facing the sun, fading across the rock
+        const toSun = p.x + p.w / 2 < W / 2
+        const glow = c.createLinearGradient(toSun ? p.x + p.w : p.x, 0, toSun ? p.x + p.w * 0.4 : p.x + p.w * 0.6, 0)
+        glow.addColorStop(0, 'rgba(255,138,61,0.55)')
+        glow.addColorStop(1, 'rgba(255,138,61,0)')
+        c.fillStyle = glow
+        c.fillRect(p.x - 4, p.y + 6, p.w + 8, depth)
+        // and the lava's glow reaching up under the lowest islands
+        const under = c.createLinearGradient(0, p.y + depth, 0, p.y + 10)
+        under.addColorStop(0, `rgba(255,90,31,${p.y > H * 0.6 ? 0.45 : 0.15})`)
+        under.addColorStop(1, 'rgba(255,90,31,0)')
+        c.fillStyle = under
+        c.fillRect(p.x - 4, p.y + 6, p.w + 8, depth)
         c.restore()
         // glowing roots trailing down
         c.lineWidth = 1.2 / k
         for (let i = 0; i < 4; i++) {
           const rx = p.x + p.w * (0.15 + r() * 0.7)
           const fx = (rx - p.x) / p.w
-          const bottom = p.y + 9 + (depth - 9) * (1 - Math.abs(fx - 0.5) * 2) * 0.5
+          const bottom = p.y + 8 + (depth - 8) * Math.pow(1 - Math.abs(fx - 0.5) * 2, 0.8) * 0.3
           const len = 10 + r() * 16
           c.strokeStyle = '#1f6a8a'
           c.beginPath()
@@ -985,22 +1102,36 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         const c = cv.getContext('2d')
         if (c) {
           c.setTransform(k, 0, 0, k, 5 * k, 5 * k)
-          c.fillStyle = linear(c, 0, h, [
-            [0, '#6a2a86'],
-            [0.45, '#b03a86'],
-            [0.75, '#ff6f5a'],
+          // a flat-ish base, then billowing puffs; each puff is lit warm from the sun below and cool from the sky above
+          const puffs: [number, number, number][] = []
+          const count = 5 + Math.floor(r() * 4)
+          for (let i = 0; i < count; i++) {
+            const fx = 0.1 + (i / (count - 1)) * 0.8 + (r() - 0.5) * 0.08
+            const pr = h * (0.3 + Math.pow(1 - Math.abs(fx - 0.5) * 2, 0.7) * 0.45 + r() * 0.12)
+            puffs.push([fx * w, h - pr * 0.85, pr])
+          }
+          puffs.sort((a, b2) => b2[2] - a[2])
+          for (const [px, py, pr] of puffs) {
+            const g = c.createRadialGradient(px, py + pr * 0.9, pr * 0.1, px, py + pr * 0.2, pr * 1.5)
+            g.addColorStop(0, '#ffe08a')
+            g.addColorStop(0.3, '#ff8a3d')
+            g.addColorStop(0.6, '#d4508a')
+            g.addColorStop(1, '#5a2a7a')
+            c.fillStyle = g
+            c.beginPath()
+            c.arc(px, py, pr, 0, Math.PI * 2)
+            c.fill()
+            c.fillStyle = 'rgba(215,196,255,0.3)'
+            c.beginPath()
+            c.arc(px - pr * 0.3, py - pr * 0.35, pr * 0.45, 0, Math.PI * 2)
+            c.fill()
+          }
+          c.fillStyle = linear(c, h * 0.6, h, [
+            [0, '#d4508a'],
+            [0.7, '#ff8a3d'],
             [1, '#ffc65c'],
           ])
-          c.beginPath()
-          const puffs = 4 + Math.floor(r() * 3)
-          for (let i = 0; i < puffs; i++) {
-            const fx = (i + 0.5) / puffs
-            const pr = h * (0.35 + (1 - Math.abs(fx - 0.5) * 2) * 0.35 + r() * 0.1)
-            c.moveTo(fx * w + pr, h - pr * 0.9)
-            c.arc(fx * w, h - pr * 0.9, pr, 0, Math.PI * 2)
-          }
-          c.rect(w * 0.08, h * 0.55, w * 0.84, h * 0.45)
-          c.fill()
+          c.fillRect(w * 0.12, h * 0.62, w * 0.76, h * 0.38)
         }
         quantize(cv, 26, false)
         return { img: cv, x: r() * W, y: H * 0.2 + r() * Math.max(10, horizon - 190 - H * 0.2), speed: 0.04 + r() * 0.06, w: w + 10 }
@@ -1019,6 +1150,16 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       if (c) {
         c.setTransform(sc, 0, 0, sc, ox, oy)
         draw(c)
+        // light the sprite like the scene: cool sky light on top, warm lava light from underneath
+        c.setTransform(1, 0, 0, 1, 0, 0)
+        c.globalCompositeOperation = 'source-atop'
+        const light = c.createLinearGradient(0, oy - 30 * sc, 0, oy + 18 * sc)
+        light.addColorStop(0, 'rgba(170,200,255,0.22)')
+        light.addColorStop(0.55, 'rgba(255,255,255,0)')
+        light.addColorStop(1, 'rgba(255,100,40,0.42)')
+        c.fillStyle = light
+        c.fillRect(0, 0, cv.width, cv.height)
+        c.globalCompositeOperation = 'source-over'
       }
       quantize(cv, 0, true)
       return { img: cv, ox, oy }
@@ -1284,6 +1425,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // ---- per-frame drawing, all in buffer pixels ----
 
+    // a repeatable 0..1 value for each (a, b, c), used to scatter shimmering pixels
+    const hash = (a: number, b2: number, c2: number) => {
+      const v = Math.sin(a * 127.1 + b2 * 311.7 + c2 * 74.7) * 43758.5453
+      return v - Math.floor(v)
+    }
+
     // a four-pointed pixel glint
     const glint = (x: number, y: number, arm: number) => {
       b.fillStyle = '#ff9de2'
@@ -1301,7 +1448,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         const y = X(s.y)
         if (s.burst) glint(x, y, tw > 0.6 ? 2 : 1)
         else {
-          b.fillStyle = tw > 0.75 ? '#ffffff' : tw > 0.4 ? '#d7c4ff' : '#8a4f9e'
+          const tint = s.phase > 5 ? '#9fdcff' : s.phase > 4.2 ? '#ffe08a' : '#ffffff'
+          b.fillStyle = tw > 0.75 ? tint : tw > 0.4 ? '#d7c4ff' : '#8a4f9e'
           b.fillRect(x, y, 1, 1)
         }
       }
@@ -1325,6 +1473,53 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         if (cl.x > W + 10) cl.x = -cl.w
         b.drawImage(cl.img, X(cl.x), X(cl.y))
       }
+    }
+
+    // a small flock of birds crossing the far sky, wings beating out of step
+    const drawBirds = () => {
+      const span = W + 200
+      const lead = ((t * 0.25) % span) - 100
+      b.fillStyle = '#3b0f5c'
+      for (let i = 0; i < 6; i++) {
+        const x = X(lead - (i % 3) * 14 - Math.floor(i / 3) * 8)
+        const y = X(H * 0.34 + (i % 3) * 6 - Math.floor(i / 3) * 9 + Math.sin(t * 0.03 + i) * 2)
+        const up = ((t >> 3) + i) % 2 === 0
+        b.fillRect(x, y, 1, 1)
+        b.fillRect(x - 1, up ? y - 1 : y, 1, 1)
+        b.fillRect(x + 1, up ? y - 1 : y, 1, 1)
+        if (up) {
+          b.fillRect(x - 2, y - 1, 1, 1)
+          b.fillRect(x + 2, y - 1, 1, 1)
+        }
+      }
+    }
+
+    // a thin glowing waterfall spilling off the central island, turning to steam where it meets the lava
+    const steam: { x: number; y: number; life: number }[] = []
+    const drawIslandFall = () => {
+      const p = platforms[2]
+      if (!p) return
+      const x0 = X(p.x + p.w * 0.84)
+      const top = X(p.y + 9)
+      const bottom = X(LAVA_Y) - 1
+      const water = ['#c9fff6', '#9fdcff', '#29f0ff', '#ffffff']
+      for (let y = top; y < bottom; y++) {
+        const sway = Math.round(Math.sin((y + t * 0.5) * 0.08) * 0.6)
+        for (let dx = 0; dx < 2; dx++) {
+          b.fillStyle = water[(((y * 3 - t * 2 + dx * 7) >> 2) % 4 + 4) % 4]
+          if ((y + dx + (t >> 1)) % 5 !== 0) b.fillRect(x0 + dx + sway, y, 1, 1)
+        }
+      }
+      // steam rising where the water hits
+      if (t % 3 === 0) steam.push({ x: x0 + Math.round((Math.random() - 0.5) * 6), y: bottom - 1, life: 40 + Math.random() * 30 })
+      for (const s2 of steam) {
+        s2.life--
+        s2.y -= 0.35
+        s2.x += Math.sin((s2.life + s2.y) * 0.15) * 0.3
+        b.fillStyle = s2.life > 40 ? '#ffffff' : s2.life > 20 ? '#d7c4ff' : '#a98cf0'
+        if (s2.life > 8 || s2.life % 2) b.fillRect(Math.round(s2.x), Math.round(s2.y), s2.life > 30 ? 2 : 1, 1)
+      }
+      while (steam.length && steam[0].life <= 0) steam.shift()
     }
 
     // molten rock pouring down from the clefts in the near mountains
@@ -1382,6 +1577,19 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         // a checkerboard row where each band meets the next, the 16-bit way to blend
         if (len < 99) for (let x = (depth + (t >> 4)) & 1; x < LW; x += 2) b.fillRect(x, surfaceY[x] + depth + len, 1, 1)
         depth += len
+      }
+      // the sun reflected in the molten lake: a shimmering column that narrows with depth
+      const sunCol = Math.round(LW / 2)
+      const sr = Math.min(W, H) * 0.24 * k
+      for (let d = 1; d < 22; d++) {
+        const half = sr * 0.7 * (1 - d / 26)
+        const count = Math.round(half * 0.5)
+        for (let i = 0; i < count; i++) {
+          const x = Math.round(sunCol + (hash(d, i, t >> 3) * 2 - 1) * half)
+          if (x < 0 || x >= LW) continue
+          b.fillStyle = hash(i, d, (t >> 3) + 1) > 0.5 ? '#fff6c8' : '#ffe08a'
+          b.fillRect(x, surfaceY[x] + d, 1 + Math.round(hash(d, i, 7) * 2), 1)
+        }
       }
       // bright currents sliding along under the crust
       b.fillStyle = '#ffa94d'
@@ -1481,10 +1689,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       b.drawImage(backdrop, 0, 0)
       drawStars()
       drawClouds()
+      drawBirds()
       drawFalls()
       b.drawImage(islands, 0, 0)
       drawCrystals()
       drawLava()
+      drawIslandFall()
       enemies.forEach((e) => drawRider(e, false))
       drawRider(player, true)
       drawSparks()
