@@ -53,11 +53,11 @@ const PAL = PALETTE.map(rgb)
 const OUTLINE = rgb('#1a0629')
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 
-const nearest = (r: number, g: number, b: number) => {
+const nearest = (r: number, g: number, b: number, pal: number[][] = PAL) => {
   let best = 0
   let bestD = Infinity
-  for (let i = 0; i < PAL.length; i++) {
-    const [pr, pg, pb] = PAL[i]
+  for (let i = 0; i < pal.length; i++) {
+    const [pr, pg, pb] = pal[i]
     const d = 2 * (r - pr) ** 2 + 4 * (g - pg) ** 2 + 3 * (b - pb) ** 2
     if (d < bestD) {
       bestD = d
@@ -69,7 +69,7 @@ const nearest = (r: number, g: number, b: number) => {
 
 // Snap a canvas to the palette. Soft edges become hard, `dither` adds the checkerboard blend between colours,
 // and `outline` rings every shape with a dark one-pixel border.
-const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean) => {
+const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean, pal: number[][] = PAL) => {
   const g = cv.getContext('2d')
   const { width: w, height: h } = cv
   if (!g || !w || !h) return
@@ -94,10 +94,10 @@ const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean) => {
       const key = ((r >> 2) << 12) | ((gg >> 2) << 6) | (b >> 2)
       let best = memo.get(key)
       if (best === undefined) {
-        best = nearest(r, gg, b)
+        best = nearest(r, gg, b, pal)
         memo.set(key, best)
       }
-      const c = PAL[best]
+      const c = pal[best]
       d[i] = c[0]
       d[i + 1] = c[1]
       d[i + 2] = c[2]
@@ -118,6 +118,60 @@ const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean) => {
         d[i + 2] = OUTLINE[2]
         d[i + 3] = 255
       }
+    }
+  }
+  g.putImageData(img, 0, 0)
+}
+
+// Each character has its own small palette, the way 16-bit sprites did: muted, earthy, realistic colours.
+const HERO_PAL = [
+  '#0d0b10', '#1b1d24', '#30343f', '#4c5262', '#6e7587', '#959caf', '#c3c8d4', '#eef0f4', // steel and shadow
+  '#e9e4d8', '#d8d2c6', '#b5ab9c', '#8c8273', '#5f574d', '#3d3731', // dapple-grey coat and wing feathers
+  '#c9a46a', '#a07c45', '#6e5430', '#4a2e1c', '#6b4428', // mane, tack and leather
+  '#1d3f46', '#2f6670', '#5a9496', // weathered teal cape
+  '#5a1620', '#80222c', '#c8a24a', // burgundy cloth, plume and gold trim
+].map(rgb)
+const FOE_PAL = [
+  '#0d0607', '#1c1210', '#2e1d16', '#45291b', '#5e3a22', '#7a4e2c', '#94653a', '#ad7f4c', '#c79c63', '#dcbc85',
+  '#efd9a8', // eagle plumage and lion coat
+  '#3a2a24', '#5a4a40', '#8a7a68', '#b8a090', // horn, bone and ash
+  '#c9a227', '#e0b84a', // amber eye and cere
+  '#14080a', '#2a0a0e', '#4a1218', '#6e1c22', // the sorcerer's near-black crimson robe
+  '#2f6a60', '#7fd6c2', '#d8fff4', // a dim, sickly glow
+].map(rgb)
+
+// The finishing pass for a sprite: the lava lights every bottom edge hard from below, and a dark edge
+// runs along the underside and sides only, not across the top, so the figure isn't boxed in by a cartoon outline.
+const finishSprite = (cv: HTMLCanvasElement, rim: string, edge: string) => {
+  const g = cv.getContext('2d')
+  const { width: w, height: h } = cv
+  if (!g || !w || !h) return
+  const img = g.getImageData(0, 0, w, h)
+  const d = img.data
+  const solid = new Uint8Array(w * h)
+  for (let i = 0; i < w * h; i++) solid[i] = d[i * 4 + 3] > 0 ? 1 : 0
+  const R = rgb(rim)
+  const E = rgb(edge)
+  const set = (p: number, c: number[]) => {
+    d[p * 4] = c[0]
+    d[p * 4 + 1] = c[1]
+    d[p * 4 + 2] = c[2]
+    d[p * 4 + 3] = 255
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x
+      if (solid[p]) {
+        // the true underside of the figure catches the lava's light: only where open air lies below,
+        // not the small gaps between feathers
+        let open = true
+        for (let dy = 1; dy <= 4 && y + dy < h; dy++) if (solid[p + dy * w]) open = false
+        if (open) set(p, R)
+        continue
+      }
+      const below = y > 0 && solid[p - w] // this empty pixel sits just under the figure
+      const beside = (x > 0 && solid[p - 1]) || (x < w - 1 && solid[p + 1])
+      if (below || beside) set(p, E)
     }
   }
   g.putImageData(img, 0, 0)
@@ -159,530 +213,589 @@ const linear = (c: Draw, y0: number, y1: number, stops: [number, string][]) => {
 
 // ---- sprite art, drawn as shapes and then pixelated ----
 
-// A feathered wing; `lift` raises it for a flap or lowers it for a glide. Each feather gets a darker edge.
-const wing = (c: Draw, lift: number, light: string, dark: string, tip: string, edge: string) => {
-  for (let k = 0; k < 5; k++) {
-    const g = c.createLinearGradient(0, -4, -32, lift - 10)
-    g.addColorStop(0, light)
-    g.addColorStop(0.6, dark)
-    g.addColorStop(1, tip)
-    c.fillStyle = g
-    c.beginPath()
-    c.moveTo(5 - k * 3, -3)
-    c.quadraticCurveTo(-6 - k * 4, lift - 20 + k * 4, -27 + k * 3.5, lift - 11 + k * 5.5)
-    c.quadraticCurveTo(-10 - k * 2, lift - 2 + k * 3, 3 - k * 3, 2)
-    c.closePath()
-    c.fill()
-    c.strokeStyle = edge
-    c.lineWidth = 1.2
-    c.stroke()
-  }
-  // the covert feathers along the top of the wing
-  c.fillStyle = light
-  c.beginPath()
-  c.moveTo(6, -3)
-  c.quadraticCurveTo(-4, lift - 12, -14, lift - 8)
-  c.quadraticCurveTo(-4, lift - 2, 4, 2)
-  c.closePath()
-  c.fill()
-}
-
-// Hero: a white winged horse with a golden mane, a red saddle cloth and an armoured rider in a cyan cape.
-const drawHero = (c: Draw, lift: number, gallop: number) => {
-  // the far wing sits behind everything, in shadow
-  c.save()
-  c.translate(3, -2)
-  wing(c, lift - 3, '#cdbfe0', '#a98cf0', '#8e2a7e', '#5a2a7a')
-  c.restore()
-  // tail
-  c.lineCap = 'round'
-  c.strokeStyle = '#e8b46a'
-  c.lineWidth = 5
-  c.beginPath()
-  c.moveTo(-15, 1)
-  c.quadraticCurveTo(-27, -3 + gallop, -33, 9)
-  c.stroke()
-  c.strokeStyle = '#ffe08a'
-  c.lineWidth = 2
-  c.beginPath()
-  c.moveTo(-16, 0)
-  c.quadraticCurveTo(-26, -4 + gallop, -31, 6)
-  c.stroke()
-  // far legs, darker
-  c.strokeStyle = '#a98cf0'
-  c.lineWidth = 3
-  c.beginPath()
-  c.moveTo(-10, 7)
-  c.lineTo(-15, 13 + gallop)
-  c.lineTo(-12, 17 + gallop)
-  c.moveTo(10, 7)
-  c.lineTo(15, 12 - gallop)
-  c.lineTo(19, 13 - gallop)
-  c.stroke()
-  // body: a rounded rump, a dipped back, a deep chest and a tucked belly
-  c.fillStyle = linear(c, -7, 12, [
-    [0, '#ffffff'],
-    [0.5, '#e8dcc8'],
-    [1, '#a98cf0'],
-  ])
-  c.beginPath()
-  c.moveTo(-17, 3)
-  c.bezierCurveTo(-18, -6, -9, -7, -1, -5)
-  c.bezierCurveTo(5, -4, 9, -6, 13, -2)
-  c.bezierCurveTo(17, 3, 14, 10, 8, 10)
-  c.bezierCurveTo(2, 12, -6, 12, -10, 10)
-  c.bezierCurveTo(-15, 9, -17, 7, -17, 3)
-  c.closePath()
-  c.fill()
-  // muscle: light on the haunch and shoulder, a shadow line along the belly and behind the shoulder
-  c.fillStyle = 'rgba(255,255,255,0.85)'
-  c.beginPath()
-  c.ellipse(-10, -1, 5, 3.4, -0.2, 0, Math.PI * 2)
-  c.ellipse(7, 0, 4.5, 3, -0.4, 0, Math.PI * 2)
-  c.fill()
-  c.strokeStyle = 'rgba(138,79,158,0.55)'
-  c.lineWidth = 1.3
-  c.beginPath()
-  c.moveTo(-9, 9)
-  c.quadraticCurveTo(0, 11, 7, 8)
-  c.moveTo(2, -3)
-  c.quadraticCurveTo(1, 3, 3, 8)
-  c.moveTo(-5, -4)
-  c.quadraticCurveTo(-7, 2, -12, 6)
-  c.stroke()
-  // neck and head
-  c.fillStyle = linear(c, -16, 6, [
-    [0, '#ffffff'],
-    [1, '#e8dcc8'],
-  ])
-  c.beginPath()
-  c.moveTo(10, -1)
-  c.quadraticCurveTo(17, -10, 20, -15)
-  c.lineTo(23, -17)
-  c.lineTo(28, -12)
-  c.quadraticCurveTo(30, -8, 26, -7)
-  c.lineTo(21, -6)
-  c.quadraticCurveTo(18, 2, 13, 6)
-  c.closePath()
-  c.fill()
-  c.fillStyle = '#cdbfe0'
-  c.beginPath()
-  c.ellipse(27, -9, 2.6, 2.2, 0, 0, Math.PI * 2)
-  c.fill()
-  c.fillStyle = '#ffffff'
-  c.beginPath()
-  c.moveTo(20, -15)
-  c.lineTo(21, -21)
-  c.lineTo(23, -16)
-  c.fill()
-  c.fillStyle = '#2b0a4a'
-  c.fillRect(22, -13.5, 2.4, 2.4)
-  // flowing mane in three locks
-  const mane = ['#ffc65c', '#ffe08a', '#e8b46a']
-  mane.forEach((col, i) => {
-    c.strokeStyle = col
-    c.lineWidth = 3
-    c.beginPath()
-    c.moveTo(21 - i * 2, -16 + i * 2)
-    c.quadraticCurveTo(13 - i * 2, -14 + gallop * 0.5 + i * 3, 8 - i, -4 + i * 2)
-    c.stroke()
-  })
-  // near legs with dark hooves
-  c.strokeStyle = '#f4f0ff'
-  c.lineWidth = 3.4
-  c.beginPath()
-  c.moveTo(-7, 8)
-  c.lineTo(-11, 14 + gallop)
-  c.lineTo(-8, 18 + gallop)
-  c.moveTo(7, 8)
-  c.lineTo(12, 13 - gallop)
-  c.lineTo(16, 15 - gallop)
-  c.stroke()
-  c.fillStyle = '#3d2a6a'
-  c.fillRect(-9.5, 17 + gallop, 4, 2.6)
-  c.fillRect(15, 14 - gallop, 4, 2.6)
-  // saddle cloth with gold trim
-  c.fillStyle = '#c0102a'
-  c.beginPath()
-  c.moveTo(-8, -4)
-  c.lineTo(7, -4)
-  c.lineTo(5, 6)
-  c.lineTo(-6, 6)
-  c.closePath()
-  c.fill()
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 1.5
-  c.beginPath()
-  c.moveTo(-6, 6)
-  c.lineTo(5, 6)
-  c.stroke()
-  // cape streaming behind the rider
-  c.fillStyle = linear(c, -18, 0, [
-    [0, '#29f0ff'],
-    [1, '#2a6ad8'],
-  ])
-  c.beginPath()
-  c.moveTo(-1, -17)
-  c.quadraticCurveTo(-15, -15 + gallop, -27, -6 + gallop)
-  c.lineTo(-22, -3 + gallop)
-  c.quadraticCurveTo(-12, -6, 1, -6)
-  c.closePath()
-  c.fill()
-  // armoured torso, belt and arm
-  c.fillStyle = linear(c, -16, -4, [
-    [0, '#c9fff6'],
-    [0.5, '#9fdcff'],
-    [1, '#5aa8ff'],
-  ])
-  c.fillRect(-3.5, -16, 8, 11)
-  c.fillStyle = '#ffc65c'
-  c.fillRect(-3.5, -7, 8, 2)
-  c.strokeStyle = '#9fdcff'
-  c.lineWidth = 2.6
-  c.beginPath()
-  c.moveTo(2, -13)
-  c.lineTo(6, -9)
-  c.stroke()
-  // helmet with a visor slit and a pink plume
-  c.fillStyle = linear(c, -24, -15, [
-    [0, '#ffffff'],
-    [1, '#8a9bc8'],
-  ])
-  c.beginPath()
-  c.arc(1, -19, 4.8, 0, Math.PI * 2)
-  c.fill()
-  c.fillStyle = '#2b0a4a'
-  c.fillRect(1.5, -19.5, 4, 1.4)
-  c.strokeStyle = '#ff3d7f'
-  c.lineWidth = 3
-  c.beginPath()
-  c.moveTo(0, -23)
-  c.quadraticCurveTo(-6, -29, -12, -24 + gallop * 0.5)
-  c.stroke()
-  // sword: gold crossguard and a long bright blade
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 2.4
-  c.beginPath()
-  c.moveTo(6.5, -12.5)
-  c.lineTo(5, -7)
-  c.stroke()
-  c.strokeStyle = '#f4f0ff'
-  c.lineWidth = 2.4
-  c.beginPath()
-  c.moveTo(6, -10)
-  c.lineTo(27, -17)
-  c.stroke()
-  c.strokeStyle = '#9fdcff'
-  c.lineWidth = 0.9
-  c.beginPath()
-  c.moveTo(8, -10.2)
-  c.lineTo(26, -16.4)
-  c.stroke()
-  // the near wing over the top
-  wing(c, lift, '#ffffff', '#ffe08a', '#ff9de2', '#d7c4ff')
-}
-
-// A real eagle's wing: layered coverts near the shoulder, barred secondaries along the trailing edge, and long
+// A great feathered wing: layered coverts near the shoulder, barred secondaries along the trailing edge, and long
 // primaries splayed into separate "fingers" at the tip. `lift` raises it for the downstroke or lowers it to glide.
 type WingTone = { primary: string; secondary: string; covert: string; bar: string; edge: string }
-const eagleWing = (c: Draw, lift: number, tone: WingTone) => {
+const bigWing = (c: Draw, lift: number, tone: WingTone, span = 1) => {
   const sx = 5
-  const sy = -3 // shoulder
-  const wx = -11
-  const wy = lift - 5 // wrist
-  // primaries: five long flight feathers fanning out from the wrist, each with a darker tip
-  for (let i = 4; i >= 0; i--) {
-    const bx = wx + i * 1.8
-    const by = wy + i * 1.5
-    const tx = wx - 17 + i * 3.4
-    const ty = wy - 5 + i * 4.6
+  const sy = -4 // shoulder
+  const wx = -12 * span
+  const wy = lift * 1.15 - 7 // wrist
+  // primaries: six long flight feathers fanning out from the wrist
+  for (let i = 5; i >= 0; i--) {
+    const bx = wx + i * 1.7
+    const by = wy + i * 1.4
+    const tx = wx - 19 * span + i * 3.6
+    const ty = wy - 6 + i * 4.4
     c.fillStyle = tone.primary
     c.beginPath()
-    c.moveTo(bx, by - 1.4)
-    c.quadraticCurveTo((bx + tx) / 2, (by + ty) / 2 - 2, tx, ty)
-    c.quadraticCurveTo((bx + tx) / 2 + 1, (by + ty) / 2 + 1.5, bx + 1.6, by + 1.4)
+    c.moveTo(bx, by - 1.3)
+    c.quadraticCurveTo((bx + tx) / 2, (by + ty) / 2 - 2.2, tx, ty)
+    c.quadraticCurveTo((bx + tx) / 2 + 1.2, (by + ty) / 2 + 1.4, bx + 1.6, by + 1.3)
     c.closePath()
     c.fill()
     c.strokeStyle = tone.bar
-    c.lineWidth = 1
+    c.lineWidth = 0.9
     c.beginPath()
-    c.moveTo((bx + tx * 2) / 3, (by + ty * 2) / 3 - 1.2)
-    c.lineTo((bx + tx * 2) / 3 + 1, (by + ty * 2) / 3 + 1)
+    c.moveTo(bx + 0.8, by)
+    c.lineTo((bx + tx) / 2, (by + ty) / 2)
     c.stroke()
   }
-  // secondaries: the broad inner wing, with a scalloped trailing edge and dark bars across it
+  // secondaries: the broad inner wing, its trailing edge scalloped feather by feather
   c.fillStyle = tone.secondary
   c.beginPath()
   c.moveTo(sx, sy)
   c.lineTo(wx, wy)
-  c.lineTo(wx + 1, wy + 9)
-  c.quadraticCurveTo(wx + 5, wy + 12, -4, 5)
+  c.lineTo(wx + 1, wy + 10)
+  for (let i = 1; i <= 5; i++) {
+    const f = i / 5
+    const x = wx + 1 + (-3 - (wx + 1)) * f
+    const y = wy + 10 + (5 - (wy + 10)) * f
+    c.quadraticCurveTo(x - 1.5, y + 2.2, x, y)
+  }
   c.lineTo(3, 3)
   c.closePath()
   c.fill()
   c.strokeStyle = tone.bar
-  c.lineWidth = 1.1
-  for (let i = 1; i <= 2; i++) {
-    const f = i / 3
+  c.lineWidth = 1
+  for (let i = 1; i <= 3; i++) {
+    const f = i / 4
     c.beginPath()
-    c.moveTo(sx + (wx - sx) * 0.15, sy + 3 * f + 1.5)
-    c.lineTo(wx + 1, wy + 9 * f + 1)
+    c.moveTo(sx - 2, sy + 4 * f + 1)
+    c.lineTo(wx + 1, wy + 10 * f)
     c.stroke()
   }
-  // coverts: the smaller, lighter feathers lying over the front of the wing
+  // coverts: the smaller feathers lying over the front of the wing
   c.fillStyle = tone.covert
   c.beginPath()
   c.moveTo(sx, sy)
   c.lineTo(wx, wy)
-  c.lineTo(wx + 2.5, wy + 4)
-  c.quadraticCurveTo(-3, (sy + wy) / 2 + 4, 3, 1)
+  c.lineTo(wx + 2.5, wy + 4.5)
+  c.quadraticCurveTo(-3, (sy + wy) / 2 + 4.5, 3, 0.5)
   c.closePath()
   c.fill()
-  // the leading edge catching the light
   c.strokeStyle = tone.edge
-  c.lineWidth = 1.2
+  c.lineWidth = 1.1
   c.beginPath()
   c.moveTo(sx, sy)
   c.lineTo(wx, wy)
   c.stroke()
 }
 
-// Foe: a griffin with a golden eagle's head, wings and taloned front legs, and a lion's body behind,
-// ridden by a hooded sorcerer with a glowing staff.
-const drawFoe = (c: Draw, lift: number) => {
-  // the far wing, in shadow behind the body
-  c.save()
-  c.translate(3, -2)
-  eagleWing(c, lift - 3, { primary: '#2b0a4a', secondary: '#4a1f10', covert: '#6b3d1c', bar: '#1a0629', edge: '#9a5a2a' })
-  c.restore()
-  // lion tail with a dark tuft at the end
+// Hero: a knight in weathered plate and a great helm, on a dapple-grey warhorse with great grey-shaded wings.
+const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.lineCap = 'round'
-  c.strokeStyle = '#d0964a'
-  c.lineWidth = 2.2
+  c.lineJoin = 'round'
+  // the far wing, in shadow
+  c.save()
+  c.translate(3, -3)
+  bigWing(c, lift - 3, { primary: '#3d3731', secondary: '#5f574d', covert: '#8c8273', bar: '#1b1d24', edge: '#b5ab9c' })
+  c.restore()
+  // a long tail streaming behind
+  c.strokeStyle = '#4a2e1c'
+  c.lineWidth = 4.5
   c.beginPath()
-  c.moveTo(-15, 1)
-  c.bezierCurveTo(-22, 2, -24, 10, -29, 6)
+  c.moveTo(-17, -1)
+  c.bezierCurveTo(-24, -3 + gallop, -29, 2 + gallop, -35, 10)
   c.stroke()
-  c.fillStyle = '#4a1f10'
+  c.strokeStyle = '#6e5430'
+  c.lineWidth = 2
   c.beginPath()
-  c.ellipse(-30, 5, 3, 2.2, 0.8, 0, Math.PI * 2)
-  c.fill()
-  // far legs, in shadow: a lion's hind leg and an eagle's foreleg
-  c.strokeStyle = '#9a5a2a'
+  c.moveTo(-18, -2)
+  c.bezierCurveTo(-24, -4 + gallop, -28, 0 + gallop, -33, 6)
+  c.stroke()
+  // far legs, darker: hind leg with its hock, foreleg with its knee
+  c.strokeStyle = '#5f574d'
   c.lineWidth = 3
   c.beginPath()
-  c.moveTo(-11, 7)
-  c.lineTo(-14, 12)
-  c.lineTo(-12, 16)
-  c.moveTo(9, 7)
-  c.lineTo(12, 12)
+  c.moveTo(-12, 6)
+  c.lineTo(-17, 11 + gallop)
+  c.lineTo(-15, 17 + gallop)
+  c.moveTo(11, 7)
+  c.lineTo(15, 11 - gallop)
+  c.lineTo(20, 12 - gallop)
   c.stroke()
-  // the lion's body: a lean flank, strong haunch and a tucked belly, golden on top and darker below
-  c.fillStyle = linear(c, -7, 12, [
-    [0, '#e8b46a'],
-    [0.55, '#d0964a'],
-    [1, '#9a5a2a'],
+  // the body of a heavy warhorse: a deep chest, a broad, rounded rump and a strong back
+  c.fillStyle = linear(c, -8, 12, [
+    [0, '#d8d2c6'],
+    [0.5, '#b5ab9c'],
+    [1, '#5f574d'],
   ])
   c.beginPath()
-  c.moveTo(-17, 3)
-  c.bezierCurveTo(-18, -5, -9, -7, -1, -5)
-  c.bezierCurveTo(4, -4, 8, -5, 11, -3)
-  c.bezierCurveTo(13, 4, 11, 10, 5, 10)
-  c.bezierCurveTo(0, 11.5, -7, 11.5, -11, 10)
-  c.bezierCurveTo(-15, 9, -17, 7, -17, 3)
+  c.moveTo(-18, 3)
+  c.bezierCurveTo(-19, -7, -10, -8, -2, -6)
+  c.bezierCurveTo(4, -5, 9, -7, 13, -3)
+  c.bezierCurveTo(17, 3, 15, 11, 9, 11)
+  c.bezierCurveTo(3, 12.5, -6, 12.5, -11, 11)
+  c.bezierCurveTo(-16, 10, -18, 8, -18, 3)
   c.closePath()
   c.fill()
-  // muscle: the haunch rounded by light, a shadow along the belly
-  c.fillStyle = 'rgba(255,224,138,0.6)'
-  c.beginPath()
-  c.ellipse(-10, -1, 5, 3.2, -0.2, 0, Math.PI * 2)
-  c.fill()
-  c.strokeStyle = 'rgba(74,31,16,0.7)'
+  // dapples across the rump and flank
+  c.fillStyle = '#8c8273'
+  for (const [x, y, r] of [
+    [-13, -1, 1.6],
+    [-9, 2, 1.3],
+    [-14, 4, 1.2],
+    [-5, 0, 1.1],
+    [-10, -4, 1.1],
+  ]) {
+    c.beginPath()
+    c.ellipse(x, y, r * 1.3, r, 0, 0, Math.PI * 2)
+    c.fill()
+  }
+  // muscle: shadow under the belly, behind the shoulder and across the stifle
+  c.strokeStyle = '#3d3731'
   c.lineWidth = 1.3
   c.beginPath()
-  c.moveTo(-10, 9.5)
-  c.quadraticCurveTo(-2, 11.5, 4, 9)
-  c.moveTo(-5, -4)
-  c.quadraticCurveTo(-7, 2, -12, 7)
+  c.moveTo(-10, 10)
+  c.quadraticCurveTo(0, 12.5, 8, 9.5)
+  c.moveTo(3, -4)
+  c.quadraticCurveTo(1, 3, 4, 9)
+  c.moveTo(-7, -5)
+  c.quadraticCurveTo(-9, 2, -14, 7)
   c.stroke()
-  // near hind leg: thigh, hock and a padded paw
-  c.fillStyle = '#d0964a'
-  c.beginPath()
-  c.ellipse(-10, 6, 4.2, 5, 0.3, 0, Math.PI * 2)
-  c.fill()
-  c.strokeStyle = '#d0964a'
-  c.lineWidth = 3.2
-  c.beginPath()
-  c.moveTo(-11, 9)
-  c.lineTo(-15, 13)
-  c.lineTo(-12, 17)
-  c.stroke()
-  c.fillStyle = '#9a5a2a'
-  c.beginPath()
-  c.ellipse(-11.5, 17.5, 2.4, 1.4, 0, 0, Math.PI * 2)
-  c.fill()
-  // the eagle's chest: barred feathers in overlapping rows, fading into the lion's coat
-  c.fillStyle = linear(c, -8, 10, [
-    [0, '#9a5a2a'],
-    [1, '#6b3d1c'],
+  // a thick, arched neck and a long, fine-boned head
+  c.fillStyle = linear(c, -20, 6, [
+    [0, '#e9e4d8'],
+    [1, '#8c8273'],
   ])
   c.beginPath()
-  c.moveTo(4, -6)
-  c.bezierCurveTo(12, -8, 16, -2, 14, 4)
-  c.bezierCurveTo(13, 9, 8, 10, 4, 9)
-  c.quadraticCurveTo(2, 2, 4, -6)
+  c.moveTo(8, -5)
+  c.bezierCurveTo(11, -13, 16, -18, 20, -19)
+  c.lineTo(23, -18)
+  c.lineTo(30, -10)
+  c.quadraticCurveTo(31, -7, 28, -6.5)
+  c.lineTo(23, -8)
+  c.quadraticCurveTo(19, -4, 17, 4)
+  c.quadraticCurveTo(14, 8, 11, 6)
   c.closePath()
   c.fill()
-  c.strokeStyle = '#e8b46a'
+  // shadow under the jaw and down the throat
+  c.strokeStyle = '#5f574d'
+  c.lineWidth = 1.3
+  c.beginPath()
+  c.moveTo(23, -8)
+  c.quadraticCurveTo(19, -5, 17, 3)
+  c.stroke()
+  // ear, eye and nostril
+  c.fillStyle = '#b5ab9c'
+  c.beginPath()
+  c.moveTo(20, -19)
+  c.lineTo(20.5, -23)
+  c.lineTo(22.5, -19)
+  c.fill()
+  c.fillStyle = '#0d0b10'
+  c.fillRect(22.5, -15, 1.8, 1.4)
+  c.fillRect(28.4, -9, 1.2, 1.2)
+  // bridle straps
+  c.strokeStyle = '#4a2e1c'
   c.lineWidth = 0.9
-  for (let row = 0; row < 4; row++) {
-    for (let col = 0; col < 2; col++) {
+  c.beginPath()
+  c.moveTo(21, -17.5)
+  c.lineTo(26.5, -8)
+  c.moveTo(24.5, -13)
+  c.lineTo(29, -9.5)
+  c.stroke()
+  // a heavy mane falling along the crest
+  for (const [i, col] of [
+    [0, '#4a2e1c'],
+    [1, '#6e5430'],
+    [2, '#a07c45'],
+  ] as [number, string][]) {
+    c.strokeStyle = col
+    c.lineWidth = 2.6
+    c.beginPath()
+    c.moveTo(20 - i, -19 + i * 1.2)
+    c.bezierCurveTo(15 - i, -16 + gallop * 0.4, 11 - i, -11 + i, 8 - i * 0.5, -5 + i)
+    c.stroke()
+  }
+  // near legs: forearm, knee and cannon, ending in dark hooves with a little feathering above
+  c.strokeStyle = '#b5ab9c'
+  c.lineWidth = 3.6
+  c.beginPath()
+  c.moveTo(-8, 8)
+  c.lineTo(-12, 13 + gallop)
+  c.lineTo(-9, 18 + gallop)
+  c.moveTo(8, 8)
+  c.lineTo(12, 13 - gallop)
+  c.lineTo(17, 15 - gallop)
+  c.stroke()
+  c.fillStyle = '#1b1d24'
+  c.fillRect(-10.5, 17.5 + gallop, 4, 2.6)
+  c.fillRect(16, 13.8 - gallop, 4, 2.6)
+  // the near wing, rising from the horse's shoulder behind the rider
+  bigWing(c, lift - 5, { primary: '#5f574d', secondary: '#b5ab9c', covert: '#e9e4d8', bar: '#3d3731', edge: '#eef0f4' }, 1.3)
+  // tack: a burgundy saddle cloth with gold trim, a leather saddle and girth
+  c.fillStyle = '#5a1620'
+  c.beginPath()
+  c.moveTo(-9, -5)
+  c.lineTo(7, -5)
+  c.lineTo(6, 7)
+  c.lineTo(-8, 7)
+  c.closePath()
+  c.fill()
+  c.strokeStyle = '#c8a24a'
+  c.lineWidth = 1.1
+  c.beginPath()
+  c.moveTo(-8, 7)
+  c.lineTo(6, 7)
+  c.stroke()
+  c.fillStyle = '#4a2e1c'
+  c.fillRect(-6, -7, 10, 4)
+  c.strokeStyle = '#4a2e1c'
+  c.lineWidth = 1.4
+  c.beginPath()
+  c.moveTo(1, -3)
+  c.lineTo(2, 9.5)
+  c.stroke()
+  // the cape, heavy and dark, its edge torn
+  c.fillStyle = linear(c, -22, 0, [
+    [0, '#2f6670'],
+    [1, '#1d3f46'],
+  ])
+  c.beginPath()
+  c.moveTo(-1, -20)
+  c.quadraticCurveTo(-10, -16 + gallop, -19, -6 + gallop)
+  c.lineTo(-16.5, -5 + gallop)
+  c.lineTo(-17, -2 + gallop)
+  c.lineTo(-13, -3 + gallop * 0.6)
+  c.quadraticCurveTo(-6, -7, 0, -9)
+  c.closePath()
+  c.fill()
+  // the knight: an armoured leg in the stirrup, a plate cuirass, a pauldron and a gauntleted arm
+  c.strokeStyle = '#6e7587'
+  c.lineWidth = 3.2
+  c.beginPath()
+  c.moveTo(0, -7)
+  c.lineTo(2, 1)
+  c.lineTo(1, 6)
+  c.stroke()
+  c.fillStyle = linear(c, -21, -6, [
+    [0, '#c3c8d4'],
+    [0.5, '#6e7587'],
+    [1, '#30343f'],
+  ])
+  c.beginPath()
+  c.moveTo(-3.5, -20)
+  c.lineTo(4, -20)
+  c.lineTo(4.5, -7)
+  c.lineTo(-3, -7)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#959caf'
+  c.beginPath()
+  c.ellipse(1.5, -18.5, 4, 2.8, -0.2, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#4a2e1c'
+  c.fillRect(-3, -9, 7.5, 1.6)
+  c.strokeStyle = '#6e7587'
+  c.lineWidth = 2.6
+  c.beginPath()
+  c.moveTo(3, -16)
+  c.lineTo(7, -12)
+  c.stroke()
+  // a great helm with a narrow eye slit and a dark red crest
+  c.fillStyle = linear(c, -29, -19, [
+    [0, '#eef0f4'],
+    [0.6, '#959caf'],
+    [1, '#4c5262'],
+  ])
+  c.beginPath()
+  c.moveTo(-2.5, -20)
+  c.lineTo(-2.5, -26)
+  c.quadraticCurveTo(1, -29.5, 4.5, -26)
+  c.lineTo(5, -20)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#0d0b10'
+  c.fillRect(1, -24.5, 4, 1.2)
+  c.strokeStyle = '#80222c'
+  c.lineWidth = 2.4
+  c.beginPath()
+  c.moveTo(1, -28.5)
+  c.quadraticCurveTo(-5, -31, -11, -26 + gallop * 0.5)
+  c.stroke()
+  // a long sword, its blade catching the light along one edge
+  c.strokeStyle = '#c8a24a'
+  c.lineWidth = 2
+  c.beginPath()
+  c.moveTo(7.5, -14.5)
+  c.lineTo(6.5, -9.5)
+  c.stroke()
+  c.strokeStyle = '#959caf'
+  c.lineWidth = 2.2
+  c.beginPath()
+  c.moveTo(7, -12)
+  c.lineTo(30, -19)
+  c.stroke()
+  c.strokeStyle = '#eef0f4'
+  c.lineWidth = 0.8
+  c.beginPath()
+  c.moveTo(9, -12.8)
+  c.lineTo(29, -19)
+  c.stroke()
+}
+
+// Foe: a griffin, eagle in front and lion behind, lunging forward with its talons out and its head low,
+// ridden by a gaunt sorcerer in a tattered, near-black robe.
+const drawFoe = (c: Draw, lift: number) => {
+  c.lineCap = 'round'
+  c.lineJoin = 'round'
+  // the far wing, raised high, in shadow
+  c.save()
+  c.translate(3, -3)
+  bigWing(c, lift - 5, { primary: '#0d0607', secondary: '#1c1210', covert: '#2e1d16', bar: '#0d0607', edge: '#45291b' })
+  c.restore()
+  // a long lion's tail, lashing, with a dark tuft
+  c.strokeStyle = '#7a4e2c'
+  c.lineWidth = 2
+  c.beginPath()
+  c.moveTo(-16, 0)
+  c.bezierCurveTo(-24, -1, -26, 9, -33, 5)
+  c.stroke()
+  c.fillStyle = '#1c1210'
+  c.beginPath()
+  c.ellipse(-34, 4, 3, 2, 0.9, 0, Math.PI * 2)
+  c.fill()
+  // far legs: a lion's hind leg bunched to spring, an eagle's foreleg reaching forward
+  c.strokeStyle = '#45291b'
+  c.lineWidth = 3
+  c.beginPath()
+  c.moveTo(-12, 6)
+  c.lineTo(-18, 10)
+  c.lineTo(-16, 15)
+  c.moveTo(9, 6)
+  c.lineTo(15, 8)
+  c.lineTo(21, 7)
+  c.stroke()
+  // the lion's body: lean and long, ribs showing under a tawny coat, darker along the spine
+  c.fillStyle = linear(c, -8, 12, [
+    [0, '#94653a'],
+    [0.45, '#ad7f4c'],
+    [1, '#5e3a22'],
+  ])
+  c.beginPath()
+  c.moveTo(-18, 2)
+  c.bezierCurveTo(-19, -6, -10, -7, -2, -5.5)
+  c.bezierCurveTo(4, -4.5, 8, -5.5, 11, -3.5)
+  c.bezierCurveTo(13, 3, 11, 9, 5, 9.5)
+  c.bezierCurveTo(-1, 10.5, -8, 10.5, -12, 9.5)
+  c.bezierCurveTo(-16, 8.5, -18, 6, -18, 2)
+  c.closePath()
+  c.fill()
+  c.strokeStyle = '#5e3a22'
+  c.lineWidth = 1.6
+  c.beginPath()
+  c.moveTo(-17, -1)
+  c.bezierCurveTo(-10, -6.5, 0, -6, 9, -4.5)
+  c.stroke()
+  c.strokeStyle = '#7a4e2c'
+  c.lineWidth = 0.9
+  for (let i = 0; i < 4; i++) {
+    c.beginPath()
+    c.moveTo(-6 + i * 3, -2)
+    c.quadraticCurveTo(-7 + i * 3, 3, -5 + i * 3, 7.5)
+    c.stroke()
+  }
+  // the haunch, tensed
+  c.fillStyle = '#94653a'
+  c.beginPath()
+  c.ellipse(-11.5, 4, 5, 5.5, 0.4, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = '#45291b'
+  c.lineWidth = 1.2
+  c.beginPath()
+  c.arc(-11.5, 4, 5, 1.6, 3.4)
+  c.stroke()
+  // near hind leg: a long hock and a heavy, clawed paw
+  c.strokeStyle = '#94653a'
+  c.lineWidth = 3.2
+  c.beginPath()
+  c.moveTo(-12, 8)
+  c.lineTo(-18, 12)
+  c.lineTo(-15, 17)
+  c.stroke()
+  c.fillStyle = '#5e3a22'
+  c.beginPath()
+  c.ellipse(-14, 17.5, 2.6, 1.4, 0, 0, Math.PI * 2)
+  c.fill()
+  // the eagle's chest and shoulders: barred feathers in overlapping rows
+  c.fillStyle = linear(c, -10, 10, [
+    [0, '#7a4e2c'],
+    [1, '#45291b'],
+  ])
+  c.beginPath()
+  c.moveTo(3, -7)
+  c.bezierCurveTo(10, -10, 16, -5, 14, 3)
+  c.bezierCurveTo(13, 8, 8, 9.5, 3, 8.5)
+  c.quadraticCurveTo(1, 1, 3, -7)
+  c.closePath()
+  c.fill()
+  c.strokeStyle = '#c79c63'
+  c.lineWidth = 0.8
+  for (let row = 0; row < 5; row++) {
+    for (let col = 0; col < 3; col++) {
       c.beginPath()
-      c.arc(7 + col * 3.5 + (row % 2) * 1.5, -3 + row * 3, 1.7, 0.3, Math.PI - 0.3)
+      c.arc(5 + col * 3 + (row % 2) * 1.5, -5 + row * 2.8, 1.4, 0.4, Math.PI - 0.4)
       c.stroke()
     }
   }
-  // near foreleg: a feathered "trouser", then a yellow scaled leg and a foot of black talons
-  c.fillStyle = '#6b3d1c'
+  // near foreleg, reaching: a feathered thigh, a scaled yellow leg and long black talons spread to strike
+  c.fillStyle = '#45291b'
   c.beginPath()
-  c.ellipse(10, 7, 3.4, 3, 0.4, 0, Math.PI * 2)
+  c.ellipse(11, 5, 3.4, 3, 0.2, 0, Math.PI * 2)
   c.fill()
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 2.2
+  c.strokeStyle = '#c9a227'
+  c.lineWidth = 2
   c.beginPath()
-  c.moveTo(11, 9)
-  c.lineTo(14, 13.5)
+  c.moveTo(12.5, 6.5)
+  c.lineTo(19, 9)
   c.stroke()
-  c.strokeStyle = '#1a0629'
-  c.lineWidth = 1.3
+  c.strokeStyle = '#0d0607'
+  c.lineWidth = 1.1
   c.beginPath()
-  c.moveTo(14, 13.5)
-  c.quadraticCurveTo(18, 13, 19, 15.5)
-  c.moveTo(14, 13.5)
-  c.quadraticCurveTo(16.5, 15.5, 16, 18)
-  c.moveTo(14, 13.5)
-  c.quadraticCurveTo(12, 16, 12.5, 18)
+  c.moveTo(19, 9)
+  c.quadraticCurveTo(23, 7, 25, 9)
+  c.moveTo(19, 9)
+  c.quadraticCurveTo(23, 10, 24, 13)
+  c.moveTo(19, 9)
+  c.quadraticCurveTo(21, 12, 20, 15)
+  c.moveTo(19, 9)
+  c.quadraticCurveTo(16.5, 11, 16, 13.5)
   c.stroke()
-  // the head is drawn a third larger than life around the base of the neck, so it reads at low resolution
-  c.save()
-  c.translate(13, -4)
-  c.scale(1.35, 1.35)
-  c.translate(-13, 4)
-  // golden hackles: the long neck feathers, pointed and lighter than the face
-  c.fillStyle = '#ffc65c'
+  // a powerful neck held low and forward, its hackles raised
+  c.fillStyle = '#7a4e2c'
   c.beginPath()
-  c.moveTo(9, -4)
-  c.lineTo(10, -13)
-  c.lineTo(12, -9)
-  c.lineTo(13, -15)
-  c.lineTo(15, -11)
-  c.lineTo(18, -13)
-  c.lineTo(17, -5)
-  c.lineTo(13, -1)
+  c.moveTo(8, -6)
+  c.quadraticCurveTo(13, -10, 18, -9)
+  c.lineTo(20, -3)
+  c.quadraticCurveTo(15, 1, 10, 2)
   c.closePath()
   c.fill()
-  // the head: a flat crown, a deep brow and a dark brown face
-  c.fillStyle = linear(c, -15, -3, [
-    [0, '#e8b46a'],
-    [0.5, '#d0964a'],
-    [1, '#9a5a2a'],
+  c.fillStyle = '#c79c63'
+  c.beginPath()
+  c.moveTo(9, -6)
+  c.lineTo(10, -11)
+  c.lineTo(12, -8.5)
+  c.lineTo(13.5, -12.5)
+  c.lineTo(15, -9.5)
+  c.lineTo(17.5, -11.5)
+  c.lineTo(18, -8)
+  c.closePath()
+  c.fill()
+  // the head, true to an eagle's size: a flat crown, a heavy brow, a golden nape
+  c.fillStyle = linear(c, -12, -2, [
+    [0, '#c79c63'],
+    [0.5, '#94653a'],
+    [1, '#5e3a22'],
   ])
   c.beginPath()
-  c.moveTo(13, -12)
-  c.quadraticCurveTo(17, -15, 21, -12.5)
-  c.quadraticCurveTo(23, -10, 22, -7)
-  c.lineTo(17, -4)
-  c.quadraticCurveTo(13, -6, 13, -12)
+  c.moveTo(16.5, -9)
+  c.quadraticCurveTo(19.5, -11.5, 23, -9.5)
+  c.quadraticCurveTo(24.5, -7.5, 23.5, -5)
+  c.lineTo(19.5, -3)
+  c.quadraticCurveTo(16.5, -4.5, 16.5, -9)
   c.closePath()
   c.fill()
-  // the hooked beak: a yellow base (the cere), a pale horn-coloured bill and a dark hooked tip
-  c.fillStyle = '#ffc65c'
+  // the beak: a yellow cere, a horn-coloured bill, a dark hooked tip, open to scream
+  c.fillStyle = '#e0b84a'
+  c.fillRect(22.3, -8.6, 1.8, 2.6)
+  c.fillStyle = '#8a7a68'
   c.beginPath()
-  c.moveTo(20.5, -11)
-  c.lineTo(23, -10.5)
-  c.lineTo(23, -7.5)
-  c.lineTo(20.5, -7.5)
+  c.moveTo(24, -8.6)
+  c.quadraticCurveTo(28.5, -8.4, 28.5, -4.8)
+  c.lineTo(27, -5.6)
+  c.lineTo(24, -6.4)
   c.closePath()
   c.fill()
-  c.fillStyle = '#ffe08a'
+  c.fillStyle = '#3a2a24'
   c.beginPath()
-  c.moveTo(22.5, -10.8)
-  c.quadraticCurveTo(28, -10.5, 27.5, -6)
-  c.quadraticCurveTo(26.5, -5.5, 25.5, -6.5)
-  c.lineTo(22.5, -7)
+  c.moveTo(27, -7.6)
+  c.quadraticCurveTo(28.8, -7, 28.5, -4.6)
+  c.lineTo(27.2, -5.4)
   c.closePath()
   c.fill()
-  c.fillStyle = '#2b0a4a'
+  c.strokeStyle = '#5a4a40'
+  c.lineWidth = 0.9
   c.beginPath()
-  c.moveTo(26, -9)
-  c.quadraticCurveTo(28, -8.5, 27.5, -6)
-  c.lineTo(26, -6.8)
-  c.closePath()
-  c.fill()
-  // a fierce amber eye under the brow
-  c.fillStyle = '#ffc65c'
-  c.fillRect(18.6, -10.6, 2.4, 2)
-  c.fillStyle = '#1a0629'
-  c.fillRect(19.6, -10.2, 1.2, 1.2)
-  c.strokeStyle = '#4a1f10'
-  c.lineWidth = 1.2
-  c.beginPath()
-  c.moveTo(17.5, -11.6)
-  c.lineTo(21.8, -11.4)
+  c.moveTo(24, -5.4)
+  c.lineTo(27, -4.2)
   c.stroke()
-  c.restore()
-  // sorcerer: crimson robe with a gold hem, sleeves and a deep hood with glowing eyes
-  c.fillStyle = linear(c, -28, -2, [
-    [0, '#ff3b6b'],
-    [0.6, '#c0102a'],
-    [1, '#6d0a2e'],
+  // a small, hard amber eye under the brow ridge
+  c.fillStyle = '#c9a227'
+  c.fillRect(20.6, -8.2, 1.6, 1.3)
+  c.fillStyle = '#0d0607'
+  c.fillRect(21.2, -8, 0.8, 0.9)
+  c.strokeStyle = '#2e1d16'
+  c.lineWidth = 1.1
+  c.beginPath()
+  c.moveTo(19.5, -9)
+  c.lineTo(23, -8.8)
+  c.stroke()
+  // the sorcerer: gaunt, hunched, in a ragged robe of near-black crimson
+  c.fillStyle = linear(c, -30, -2, [
+    [0, '#4a1218'],
+    [0.5, '#2a0a0e'],
+    [1, '#14080a'],
   ])
   c.beginPath()
-  c.moveTo(0, -29)
-  c.quadraticCurveTo(3, -22, 9, -3)
-  c.lineTo(-8, -3)
-  c.quadraticCurveTo(-3, -20, 0, -29)
+  c.moveTo(-1, -30)
+  c.quadraticCurveTo(4, -26, 6, -18)
+  c.lineTo(8, -4)
+  c.lineTo(6, -2)
+  c.lineTo(4.5, -4.5)
+  c.lineTo(2.5, -1.5)
+  c.lineTo(0.5, -4.5)
+  c.lineTo(-2, -1.5)
+  c.lineTo(-4, -4.5)
+  c.lineTo(-6.5, -2)
+  c.lineTo(-7, -6)
+  c.quadraticCurveTo(-5, -18, -1, -30)
   c.closePath()
   c.fill()
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 1.6
+  // a deep hood, and only a faint glint where the eyes should be
+  c.fillStyle = '#0d0607'
   c.beginPath()
-  c.moveTo(-8, -3.5)
-  c.lineTo(9, -3.5)
-  c.stroke()
-  c.fillStyle = '#1a0629'
-  c.beginPath()
-  c.ellipse(1.5, -19, 3.4, 3.8, 0, 0, Math.PI * 2)
+  c.ellipse(1.6, -22.5, 2.8, 3.4, 0.2, 0, Math.PI * 2)
   c.fill()
-  c.fillStyle = '#29f0ff'
-  c.fillRect(1.5, -20, 1.6, 1.6)
-  c.fillRect(4, -20, 1.6, 1.6)
-  c.strokeStyle = '#c0102a'
-  c.lineWidth = 3
-  c.beginPath()
-  c.moveTo(2, -14)
-  c.lineTo(7, -10)
-  c.stroke()
-  // a gnarled staff topped with a violet orb
-  c.strokeStyle = '#4a1f10'
+  c.fillStyle = '#7fd6c2'
+  c.fillRect(2.4, -23.4, 1, 1)
+  // a bony hand on the staff
+  c.strokeStyle = '#4a1218'
   c.lineWidth = 2.4
   c.beginPath()
-  c.moveTo(6, -3)
-  c.lineTo(10, -16)
-  c.lineTo(12, -25)
+  c.moveTo(2, -17)
+  c.lineTo(7, -13)
   c.stroke()
-  c.fillStyle = 'rgba(179,136,255,0.55)'
+  c.fillStyle = '#b8a090'
+  c.fillRect(6.4, -14, 2, 2)
+  // the staff: gnarled dark wood, twisting up to a dim, sickly light
+  c.strokeStyle = '#2e1d16'
+  c.lineWidth = 1.8
   c.beginPath()
-  c.arc(12, -28, 6.5, 0, Math.PI * 2)
-  c.fill()
-  c.fillStyle = '#b388ff'
+  c.moveTo(6, -1)
+  c.lineTo(8, -10)
+  c.lineTo(7, -17)
+  c.lineTo(9, -25)
+  c.stroke()
+  c.strokeStyle = '#45291b'
+  c.lineWidth = 1
   c.beginPath()
-  c.arc(12, -28, 4, 0, Math.PI * 2)
+  c.moveTo(9, -25)
+  c.lineTo(7, -28)
+  c.moveTo(9, -25)
+  c.lineTo(11, -28.5)
+  c.stroke()
+  c.fillStyle = '#2f6a60'
+  c.beginPath()
+  c.arc(9, -27.5, 2.6, 0, Math.PI * 2)
   c.fill()
-  c.fillStyle = '#ffffff'
-  c.fillRect(10.5, -30, 2.2, 2.2)
-  // the near wing, lit by the sunset
-  eagleWing(c, lift, { primary: '#4a1f10', secondary: '#9a5a2a', covert: '#d0964a', bar: '#4a1f10', edge: '#ffe08a' })
+  c.fillStyle = '#7fd6c2'
+  c.beginPath()
+  c.arc(9, -27.5, 1.4, 0, Math.PI * 2)
+  c.fill()
+  // the near wing, huge and raised, golden along its leading edge
+  bigWing(c, lift - 2, { primary: '#1c1210', secondary: '#45291b', covert: '#7a4e2c', bar: '#0d0607', edge: '#c79c63' }, 1.15)
 }
 
 // Wing positions for the animation frames: a full downstroke, then three gliding poses with the wings held up in a V.
@@ -1320,7 +1433,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     // Sprites are drawn as shapes into a small canvas at buffer resolution, then pixelated with an outline.
-    const makeFrame = (draw: (c: Draw) => void): Frame => {
+    const makeFrame = (draw: (c: Draw) => void, pal: number[][], rim: string, edge: string): Frame => {
       const sc = k * SPRITE_SCALE
       const cv = document.createElement('canvas')
       cv.width = Math.ceil(100 * sc) + 2
@@ -1335,14 +1448,15 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         c.setTransform(1, 0, 0, 1, 0, 0)
         c.globalCompositeOperation = 'source-atop'
         const light = c.createLinearGradient(0, oy - 30 * sc, 0, oy + 18 * sc)
-        light.addColorStop(0, 'rgba(170,200,255,0.22)')
-        light.addColorStop(0.55, 'rgba(255,255,255,0)')
-        light.addColorStop(1, 'rgba(255,100,40,0.42)')
+        light.addColorStop(0, 'rgba(150,170,230,0.14)')
+        light.addColorStop(0.6, 'rgba(0,0,0,0.12)')
+        light.addColorStop(1, 'rgba(255,100,40,0.3)')
         c.fillStyle = light
         c.fillRect(0, 0, cv.width, cv.height)
         c.globalCompositeOperation = 'source-over'
       }
-      quantize(cv, 0, true)
+      quantize(cv, 0, false, pal)
+      finishSprite(cv, rim, edge)
       return { img: cv, ox, oy }
     }
 
@@ -1464,8 +1578,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       paintBackdrop()
       paintIslands()
       makeClouds()
-      heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop)))
-      foeFrames = POSES.map(([lift]) => makeFrame((c) => drawFoe(c, lift)))
+      heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop), HERO_PAL, '#c9a46a', '#0d0b10'))
+      foeFrames = POSES.map(([lift]) => makeFrame((c) => drawFoe(c, lift), FOE_PAL, '#dcbc85', '#0d0607'))
     }
     fit()
 
@@ -1921,8 +2035,11 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       b.drawImage(f.img, -f.ox, -f.oy)
       b.restore()
       // a glint running along the hero's sword, and a pulse on each sorcerer's orb
-      if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 27 * SPRITE_SCALE), X(r.y - 17 * SPRITE_SCALE), 2)
-      if (!hero && Math.sin(t * 0.15 + r.x) > 0.3) glint(X(r.x + r.dir * 12 * SPRITE_SCALE), X(r.y - 28 * SPRITE_SCALE), 1)
+      if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 30 * SPRITE_SCALE), X(r.y - 19 * SPRITE_SCALE), 2)
+      if (!hero && Math.sin(t * 0.15 + r.x) > 0.6) {
+        b.fillStyle = '#c9fff6'
+        b.fillRect(X(r.x + r.dir * 9 * SPRITE_SCALE), X(r.y - 27.5 * SPRITE_SCALE), 1, 1)
+      }
     }
 
     const drawSparks = () => {
@@ -2068,7 +2185,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         ctx.fillRect(x - r * S, y - r * S, r * S * 2, r * S * 2)
       }
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
-      for (const e of enemies) if (e.alive) light(e.x + e.dir * 12 * SPRITE_SCALE, e.y - 28 * SPRITE_SCALE, 9, 'rgba(179,136,255,A)', 0.3)
+      for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
       const isle = platforms[2]
       if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
