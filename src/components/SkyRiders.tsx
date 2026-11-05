@@ -17,7 +17,7 @@ import { useEffect, useRef } from 'react'
 
 const GRAVITY = 0.22
 const FLAP = -4.2
-const SPRITE_SCALE = 1.6
+const SPRITE_SCALE = 1.9
 // How many lines tall the picture is. Fewer lines means bigger, chunkier pixels on screen.
 const LINES = 168
 
@@ -382,106 +382,255 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   wing(c, lift, '#ffffff', '#ffe08a', '#ff9de2', '#d7c4ff')
 }
 
-// Foe: a bronze griffin with a white feathered head and talons, ridden by a hooded sorcerer with a glowing staff.
+// A real eagle's wing: layered coverts near the shoulder, barred secondaries along the trailing edge, and long
+// primaries splayed into separate "fingers" at the tip. `lift` raises it for the downstroke or lowers it to glide.
+type WingTone = { primary: string; secondary: string; covert: string; bar: string; edge: string }
+const eagleWing = (c: Draw, lift: number, tone: WingTone) => {
+  const sx = 5
+  const sy = -3 // shoulder
+  const wx = -11
+  const wy = lift - 5 // wrist
+  // primaries: five long flight feathers fanning out from the wrist, each with a darker tip
+  for (let i = 4; i >= 0; i--) {
+    const bx = wx + i * 1.8
+    const by = wy + i * 1.5
+    const tx = wx - 17 + i * 3.4
+    const ty = wy - 5 + i * 4.6
+    c.fillStyle = tone.primary
+    c.beginPath()
+    c.moveTo(bx, by - 1.4)
+    c.quadraticCurveTo((bx + tx) / 2, (by + ty) / 2 - 2, tx, ty)
+    c.quadraticCurveTo((bx + tx) / 2 + 1, (by + ty) / 2 + 1.5, bx + 1.6, by + 1.4)
+    c.closePath()
+    c.fill()
+    c.strokeStyle = tone.bar
+    c.lineWidth = 1
+    c.beginPath()
+    c.moveTo((bx + tx * 2) / 3, (by + ty * 2) / 3 - 1.2)
+    c.lineTo((bx + tx * 2) / 3 + 1, (by + ty * 2) / 3 + 1)
+    c.stroke()
+  }
+  // secondaries: the broad inner wing, with a scalloped trailing edge and dark bars across it
+  c.fillStyle = tone.secondary
+  c.beginPath()
+  c.moveTo(sx, sy)
+  c.lineTo(wx, wy)
+  c.lineTo(wx + 1, wy + 9)
+  c.quadraticCurveTo(wx + 5, wy + 12, -4, 5)
+  c.lineTo(3, 3)
+  c.closePath()
+  c.fill()
+  c.strokeStyle = tone.bar
+  c.lineWidth = 1.1
+  for (let i = 1; i <= 2; i++) {
+    const f = i / 3
+    c.beginPath()
+    c.moveTo(sx + (wx - sx) * 0.15, sy + 3 * f + 1.5)
+    c.lineTo(wx + 1, wy + 9 * f + 1)
+    c.stroke()
+  }
+  // coverts: the smaller, lighter feathers lying over the front of the wing
+  c.fillStyle = tone.covert
+  c.beginPath()
+  c.moveTo(sx, sy)
+  c.lineTo(wx, wy)
+  c.lineTo(wx + 2.5, wy + 4)
+  c.quadraticCurveTo(-3, (sy + wy) / 2 + 4, 3, 1)
+  c.closePath()
+  c.fill()
+  // the leading edge catching the light
+  c.strokeStyle = tone.edge
+  c.lineWidth = 1.2
+  c.beginPath()
+  c.moveTo(sx, sy)
+  c.lineTo(wx, wy)
+  c.stroke()
+}
+
+// Foe: a griffin with a golden eagle's head, wings and taloned front legs, and a lion's body behind,
+// ridden by a hooded sorcerer with a glowing staff.
 const drawFoe = (c: Draw, lift: number) => {
+  // the far wing, in shadow behind the body
   c.save()
   c.translate(3, -2)
-  wing(c, lift - 3, '#9a5a2a', '#6b3d1c', '#4a1f10', '#4a1f10')
+  eagleWing(c, lift - 3, { primary: '#2b0a4a', secondary: '#4a1f10', covert: '#6b3d1c', bar: '#1a0629', edge: '#9a5a2a' })
   c.restore()
-  // lion tail with a dark tuft
+  // lion tail with a dark tuft at the end
   c.lineCap = 'round'
-  c.strokeStyle = '#9a5a2a'
-  c.lineWidth = 2.4
+  c.strokeStyle = '#d0964a'
+  c.lineWidth = 2.2
   c.beginPath()
-  c.moveTo(-15, 2)
-  c.quadraticCurveTo(-25, 8, -29, -2)
+  c.moveTo(-15, 1)
+  c.bezierCurveTo(-22, 2, -24, 10, -29, 6)
   c.stroke()
   c.fillStyle = '#4a1f10'
   c.beginPath()
-  c.ellipse(-29, -3, 3, 2.4, 0.6, 0, Math.PI * 2)
+  c.ellipse(-30, 5, 3, 2.2, 0.8, 0, Math.PI * 2)
   c.fill()
-  // hind legs with paws
+  // far legs, in shadow: a lion's hind leg and an eagle's foreleg
   c.strokeStyle = '#9a5a2a'
-  c.lineWidth = 3.4
+  c.lineWidth = 3
   c.beginPath()
-  c.moveTo(-9, 7)
-  c.lineTo(-13, 14)
-  c.moveTo(-4, 8)
-  c.lineTo(-6, 15)
+  c.moveTo(-11, 7)
+  c.lineTo(-14, 12)
+  c.lineTo(-12, 16)
+  c.moveTo(9, 7)
+  c.lineTo(12, 12)
   c.stroke()
-  // body: tawny lion back blending into a feathered chest
-  c.fillStyle = linear(c, -6, 12, [
+  // the lion's body: a lean flank, strong haunch and a tucked belly, golden on top and darker below
+  c.fillStyle = linear(c, -7, 12, [
     [0, '#e8b46a'],
-    [0.6, '#d0964a'],
+    [0.55, '#d0964a'],
+    [1, '#9a5a2a'],
+  ])
+  c.beginPath()
+  c.moveTo(-17, 3)
+  c.bezierCurveTo(-18, -5, -9, -7, -1, -5)
+  c.bezierCurveTo(4, -4, 8, -5, 11, -3)
+  c.bezierCurveTo(13, 4, 11, 10, 5, 10)
+  c.bezierCurveTo(0, 11.5, -7, 11.5, -11, 10)
+  c.bezierCurveTo(-15, 9, -17, 7, -17, 3)
+  c.closePath()
+  c.fill()
+  // muscle: the haunch rounded by light, a shadow along the belly
+  c.fillStyle = 'rgba(255,224,138,0.6)'
+  c.beginPath()
+  c.ellipse(-10, -1, 5, 3.2, -0.2, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = 'rgba(74,31,16,0.7)'
+  c.lineWidth = 1.3
+  c.beginPath()
+  c.moveTo(-10, 9.5)
+  c.quadraticCurveTo(-2, 11.5, 4, 9)
+  c.moveTo(-5, -4)
+  c.quadraticCurveTo(-7, 2, -12, 7)
+  c.stroke()
+  // near hind leg: thigh, hock and a padded paw
+  c.fillStyle = '#d0964a'
+  c.beginPath()
+  c.ellipse(-10, 6, 4.2, 5, 0.3, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = '#d0964a'
+  c.lineWidth = 3.2
+  c.beginPath()
+  c.moveTo(-11, 9)
+  c.lineTo(-15, 13)
+  c.lineTo(-12, 17)
+  c.stroke()
+  c.fillStyle = '#9a5a2a'
+  c.beginPath()
+  c.ellipse(-11.5, 17.5, 2.4, 1.4, 0, 0, Math.PI * 2)
+  c.fill()
+  // the eagle's chest: barred feathers in overlapping rows, fading into the lion's coat
+  c.fillStyle = linear(c, -8, 10, [
+    [0, '#9a5a2a'],
     [1, '#6b3d1c'],
   ])
   c.beginPath()
-  c.moveTo(-16, 3)
-  c.bezierCurveTo(-17, -5, -8, -7, 0, -5)
-  c.bezierCurveTo(6, -4, 12, -5, 15, 0)
-  c.bezierCurveTo(16, 6, 12, 10, 6, 10)
-  c.bezierCurveTo(0, 12, -7, 12, -11, 10)
-  c.bezierCurveTo(-15, 9, -16, 7, -16, 3)
+  c.moveTo(4, -6)
+  c.bezierCurveTo(12, -8, 16, -2, 14, 4)
+  c.bezierCurveTo(13, 9, 8, 10, 4, 9)
+  c.quadraticCurveTo(2, 2, 4, -6)
   c.closePath()
   c.fill()
-  c.fillStyle = 'rgba(255,214,140,0.7)'
+  c.strokeStyle = '#e8b46a'
+  c.lineWidth = 0.9
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 2; col++) {
+      c.beginPath()
+      c.arc(7 + col * 3.5 + (row % 2) * 1.5, -3 + row * 3, 1.7, 0.3, Math.PI - 0.3)
+      c.stroke()
+    }
+  }
+  // near foreleg: a feathered "trouser", then a yellow scaled leg and a foot of black talons
+  c.fillStyle = '#6b3d1c'
   c.beginPath()
-  c.ellipse(-9, -1, 4.5, 3, -0.2, 0, Math.PI * 2)
+  c.ellipse(10, 7, 3.4, 3, 0.4, 0, Math.PI * 2)
   c.fill()
-  c.strokeStyle = 'rgba(74,31,16,0.6)'
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 2.2
+  c.beginPath()
+  c.moveTo(11, 9)
+  c.lineTo(14, 13.5)
+  c.stroke()
+  c.strokeStyle = '#1a0629'
   c.lineWidth = 1.3
   c.beginPath()
-  c.moveTo(-9, 9)
-  c.quadraticCurveTo(-1, 11, 5, 8)
-  c.moveTo(-4, -4)
-  c.quadraticCurveTo(-6, 2, -11, 6)
+  c.moveTo(14, 13.5)
+  c.quadraticCurveTo(18, 13, 19, 15.5)
+  c.moveTo(14, 13.5)
+  c.quadraticCurveTo(16.5, 15.5, 16, 18)
+  c.moveTo(14, 13.5)
+  c.quadraticCurveTo(12, 16, 12.5, 18)
   c.stroke()
-  // a feathered chest, scalloped
-  c.fillStyle = '#e8dcc8'
+  // the head is drawn a third larger than life around the base of the neck, so it reads at low resolution
+  c.save()
+  c.translate(13, -4)
+  c.scale(1.35, 1.35)
+  c.translate(-13, 4)
+  // golden hackles: the long neck feathers, pointed and lighter than the face
+  c.fillStyle = '#ffc65c'
   c.beginPath()
-  c.ellipse(11, 2, 7, 6.5, 0, 0, Math.PI * 2)
-  c.fill()
-  c.strokeStyle = '#cdbfe0'
-  c.lineWidth = 1
-  for (let i = 0; i < 3; i++) {
-    c.beginPath()
-    c.arc(11, -1 + i * 3, 4, 0.2, Math.PI - 0.2)
-    c.stroke()
-  }
-  // yellow talons reaching forward
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 2.6
-  c.beginPath()
-  c.moveTo(12, 7)
-  c.lineTo(17, 13)
-  c.lineTo(21, 12)
-  c.moveTo(8, 8)
-  c.lineTo(11, 15)
-  c.lineTo(15, 15)
-  c.stroke()
-  // eagle head, ear tufts and hooked beak
-  c.fillStyle = linear(c, -13, 0, [
-    [0, '#ffffff'],
-    [1, '#e8dcc8'],
-  ])
-  c.beginPath()
-  c.arc(16, -6, 6.5, 0, Math.PI * 2)
-  c.fill()
-  c.fillStyle = '#d0964a'
-  c.beginPath()
-  c.moveTo(12, -10)
-  c.lineTo(9, -17)
-  c.lineTo(15, -12)
-  c.fill()
-  c.fillStyle = '#ffa94d'
-  c.beginPath()
-  c.moveTo(21, -9)
-  c.quadraticCurveTo(29, -8, 26, -1)
-  c.lineTo(21, -4)
+  c.moveTo(9, -4)
+  c.lineTo(10, -13)
+  c.lineTo(12, -9)
+  c.lineTo(13, -15)
+  c.lineTo(15, -11)
+  c.lineTo(18, -13)
+  c.lineTo(17, -5)
+  c.lineTo(13, -1)
   c.closePath()
   c.fill()
-  c.fillStyle = '#c0102a'
-  c.fillRect(16.5, -9, 2.6, 2.6)
+  // the head: a flat crown, a deep brow and a dark brown face
+  c.fillStyle = linear(c, -15, -3, [
+    [0, '#e8b46a'],
+    [0.5, '#d0964a'],
+    [1, '#9a5a2a'],
+  ])
+  c.beginPath()
+  c.moveTo(13, -12)
+  c.quadraticCurveTo(17, -15, 21, -12.5)
+  c.quadraticCurveTo(23, -10, 22, -7)
+  c.lineTo(17, -4)
+  c.quadraticCurveTo(13, -6, 13, -12)
+  c.closePath()
+  c.fill()
+  // the hooked beak: a yellow base (the cere), a pale horn-coloured bill and a dark hooked tip
+  c.fillStyle = '#ffc65c'
+  c.beginPath()
+  c.moveTo(20.5, -11)
+  c.lineTo(23, -10.5)
+  c.lineTo(23, -7.5)
+  c.lineTo(20.5, -7.5)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#ffe08a'
+  c.beginPath()
+  c.moveTo(22.5, -10.8)
+  c.quadraticCurveTo(28, -10.5, 27.5, -6)
+  c.quadraticCurveTo(26.5, -5.5, 25.5, -6.5)
+  c.lineTo(22.5, -7)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#2b0a4a'
+  c.beginPath()
+  c.moveTo(26, -9)
+  c.quadraticCurveTo(28, -8.5, 27.5, -6)
+  c.lineTo(26, -6.8)
+  c.closePath()
+  c.fill()
+  // a fierce amber eye under the brow
+  c.fillStyle = '#ffc65c'
+  c.fillRect(18.6, -10.6, 2.4, 2)
+  c.fillStyle = '#1a0629'
+  c.fillRect(19.6, -10.2, 1.2, 1.2)
+  c.strokeStyle = '#4a1f10'
+  c.lineWidth = 1.2
+  c.beginPath()
+  c.moveTo(17.5, -11.6)
+  c.lineTo(21.8, -11.4)
+  c.stroke()
+  c.restore()
   // sorcerer: crimson robe with a gold hem, sleeves and a deep hood with glowing eyes
   c.fillStyle = linear(c, -28, -2, [
     [0, '#ff3b6b'],
@@ -532,15 +681,16 @@ const drawFoe = (c: Draw, lift: number) => {
   c.fill()
   c.fillStyle = '#ffffff'
   c.fillRect(10.5, -30, 2.2, 2.2)
-  wing(c, lift, '#e8b46a', '#9a5a2a', '#4a1f10', '#6b3d1c')
+  // the near wing, lit by the sunset
+  eagleWing(c, lift, { primary: '#4a1f10', secondary: '#9a5a2a', covert: '#d0964a', bar: '#4a1f10', edge: '#ffe08a' })
 }
 
-// Wing positions for the animation frames: a flap, then three glide poses.
+// Wing positions for the animation frames: a full downstroke, then three gliding poses with the wings held up in a V.
 const POSES: [number, number][] = [
-  [-15, 0],
-  [5, 2],
-  [2, 0],
-  [-1, -2],
+  [-16, 0],
+  [-7, 2],
+  [-4, 0],
+  [-10, -2],
 ]
 
 export default function SkyRiders({ className = 'block h-full w-full' }: { className?: string }) {
@@ -1543,21 +1693,85 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    // a small flock of birds crossing the far sky, wings beating out of step
+    // Flocks of birds crossing the sunset in V formation, seen as distant silhouettes: dark against the sky,
+    // with the light glowing through the trailing edges of their wings. Each bird beats its wings through
+    // a full stroke, out of step with its neighbours, and now and then glides.
+    const BIRD_LIFTS = [-7, -4, 0, 5, 2, -4]
+    let birdFrames: HTMLCanvasElement[][] = []
+    const makeBirds = () => {
+      birdFrames = [1.8, 2.6].map((size) =>
+        [...BIRD_LIFTS, -1].map((lift) => {
+          const sc = k * size * 0.9
+          const cv = document.createElement('canvas')
+          cv.width = Math.ceil(30 * sc) + 2
+          cv.height = Math.ceil(22 * sc) + 2
+          const c = cv.getContext('2d')
+          if (c) {
+            c.setTransform(sc, 0, 0, sc, 15 * sc + 1, 11 * sc + 1)
+            // seen from a little in front, as distant birds are: a small body and two long jointed wings.
+            // Each wing bends at the wrist, so the silhouette sweeps from a high "M" to a low curve.
+            for (const side of [-1, 1]) {
+              const elbowY = lift * 0.55
+              const tipY = lift
+              c.fillStyle = '#2b0a4a'
+              c.beginPath()
+              c.moveTo(side * 1.5, -1)
+              c.quadraticCurveTo(side * 4, elbowY - 2.2, side * 6.5, elbowY - 0.8)
+              c.quadraticCurveTo(side * 10, tipY - 1, side * 13, tipY + 0.6)
+              c.quadraticCurveTo(side * 9.5, tipY + 1.6, side * 6.5, elbowY + 1.4)
+              c.quadraticCurveTo(side * 4, elbowY + 1.2, side * 1.5, 1.2)
+              c.closePath()
+              c.fill()
+              // the sunset glowing through the trailing edge
+              c.strokeStyle = '#d4508a'
+              c.lineWidth = 0.9
+              c.beginPath()
+              c.moveTo(side * 13, tipY + 0.8)
+              c.quadraticCurveTo(side * 9.5, tipY + 1.8, side * 6.5, elbowY + 1.6)
+              c.stroke()
+            }
+            // body and head, with a short fanned tail
+            c.fillStyle = '#1a0629'
+            c.beginPath()
+            c.ellipse(0, 0.3, 2, 2.6, 0, 0, Math.PI * 2)
+            c.fill()
+            c.beginPath()
+            c.arc(0, -2.4, 1.3, 0, Math.PI * 2)
+            c.fill()
+            c.beginPath()
+            c.moveTo(-1.4, 2)
+            c.lineTo(0, 4.6)
+            c.lineTo(1.4, 2)
+            c.closePath()
+            c.fill()
+          }
+          quantize(cv, 0, false)
+          return cv
+        }),
+      )
+    }
+    makeBirds()
+
     const drawBirds = () => {
-      const span = W + 200
-      const lead = ((t * 0.25) % span) - 100
-      b.fillStyle = '#3b0f5c'
-      for (let i = 0; i < 6; i++) {
-        const x = X(lead - (i % 3) * 14 - Math.floor(i / 3) * 8)
-        const y = X(H * 0.34 + (i % 3) * 6 - Math.floor(i / 3) * 9 + Math.sin(t * 0.03 + i) * 2)
-        const up = ((t >> 3) + i) % 2 === 0
-        b.fillRect(x, y, 1, 1)
-        b.fillRect(x - 1, up ? y - 1 : y, 1, 1)
-        b.fillRect(x + 1, up ? y - 1 : y, 1, 1)
-        if (up) {
-          b.fillRect(x - 2, y - 1, 1, 1)
-          b.fillRect(x + 2, y - 1, 1, 1)
+      const flocks = [
+        { size: 0, count: 5, speed: 0.22, y: 0.3, phase: 300 },
+        { size: 1, count: 3, speed: 0.34, y: 0.42, phase: 520 },
+      ]
+      for (const fl of flocks) {
+        const frames = birdFrames[fl.size]
+        if (!frames) continue
+        const spacing = (fl.size ? 2.6 : 1.8) * 16
+        const span = W + 300
+        const lead = ((t * fl.speed + fl.phase) % span) - 60
+        for (let i = 0; i < fl.count; i++) {
+          // the V: each pair sits a step behind and to either side of the leader
+          const rank = Math.ceil(i / 2)
+          const side = i % 2 ? -1 : 1
+          const wx = lead - rank * spacing
+          const wy = H * fl.y + side * rank * spacing * 0.45 + Math.sin(t * 0.02 + i * 1.7) * 1.5
+          const glide = ((t >> 6) + i) % 4 === 0
+          const frame = glide ? frames[BIRD_LIFTS.length] : frames[Math.floor(t * 0.18 + i * 1.3) % BIRD_LIFTS.length]
+          b.drawImage(frame, X(wx) - Math.round(frame.width / 2), X(wy) - Math.round(frame.height / 2))
         }
       }
     }
@@ -1984,6 +2198,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     // Keep riders on screen if the window changes shape.
     const onResize = () => {
       fit()
+      makeBirds()
       for (const r of [player, ...enemies]) {
         r.x = Math.min(r.x, W)
         r.y = Math.min(r.y, LAVA_Y - 60)
