@@ -17,7 +17,7 @@ import { useEffect, useRef } from 'react'
 
 const GRAVITY = 0.22
 const FLAP = -4.2
-const SPRITE_SCALE = 1.35
+const SPRITE_SCALE = 1
 // where a rider's hooves or paws are, and how close two riders must be to clash, both follow the drawn size
 const FOOT = Math.round(17 * SPRITE_SCALE)
 const REACH = Math.round(22 * SPRITE_SCALE)
