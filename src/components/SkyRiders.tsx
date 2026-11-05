@@ -133,6 +133,8 @@ const HERO_PAL = [
   '#c9a46a', '#a07c45', '#6e5430', '#4a2e1c', '#6b4428', // mane, tack and leather
   '#1d3f46', '#2f6670', '#5a9496', // weathered teal cape
   '#5a1620', '#80222c', '#c8a24a', // burgundy cloth, plume and gold trim
+  '#ffffff', '#f4f2ec', '#e2ddd2', '#c2b9a9', '#a99f90', // an ivory-white coat
+  '#9fdcff', '#5aa8ff', '#2a6ad8', '#1d3f8a', '#29f0ff', // azure cape and cloth, a cyan crest
 ].map(rgb)
 const FOE_PAL = [
   '#0d0607', '#1c1210', '#2e1d16', '#45291b', '#5e3a22', '#7a4e2c', '#94653a', '#ad7f4c', '#c79c63', '#dcbc85',
@@ -285,14 +287,15 @@ const bigWing = (c: Draw, lift: number, tone: WingTone, span = 1) => {
   c.stroke()
 }
 
-// Hero: a knight in weathered plate and a great helm, on a dapple-grey warhorse with great grey-shaded wings.
+// Hero: a knight in polished plate and a great helm with a cyan crest, on an ivory-white warhorse with great
+// white wings, an azure cape and saddle cloth: bright and cool, so he always stands apart from the dark, warm enemies.
 const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.lineCap = 'round'
   c.lineJoin = 'round'
   // the far wing, in shadow
   c.save()
   c.translate(3, -3)
-  bigWing(c, lift - 3, { primary: '#3d3731', secondary: '#5f574d', covert: '#8c8273', bar: '#1b1d24', edge: '#b5ab9c' })
+  bigWing(c, lift - 3, { primary: '#8c8273', secondary: '#a99f90', covert: '#c2b9a9', bar: '#5f574d', edge: '#e2ddd2' })
   c.restore()
   // a long tail streaming behind
   c.strokeStyle = '#4a2e1c'
@@ -308,7 +311,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.bezierCurveTo(-24, -4 + gallop, -28, 0 + gallop, -33, 6)
   c.stroke()
   // far legs, darker: hind leg with its hock, foreleg with its knee
-  c.strokeStyle = '#5f574d'
+  c.strokeStyle = '#a99f90'
   c.lineWidth = 3
   c.beginPath()
   c.moveTo(-12, 6)
@@ -320,9 +323,9 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.stroke()
   // the body of a heavy warhorse: a deep chest, a broad, rounded rump and a strong back
   c.fillStyle = linear(c, -8, 12, [
-    [0, '#d8d2c6'],
-    [0.5, '#b5ab9c'],
-    [1, '#5f574d'],
+    [0, '#ffffff'],
+    [0.5, '#e2ddd2'],
+    [1, '#a99f90'],
   ])
   c.beginPath()
   c.moveTo(-18, 3)
@@ -334,7 +337,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.closePath()
   c.fill()
   // dapples across the rump and flank
-  c.fillStyle = '#8c8273'
+  c.fillStyle = '#c2b9a9'
   for (const [x, y, r] of [
     [-13, -1, 1.6],
     [-9, 2, 1.3],
@@ -347,7 +350,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
     c.fill()
   }
   // muscle: shadow under the belly, behind the shoulder and across the stifle
-  c.strokeStyle = '#3d3731'
+  c.strokeStyle = '#a99f90'
   c.lineWidth = 1.3
   c.beginPath()
   c.moveTo(-10, 10)
@@ -359,8 +362,8 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.stroke()
   // a thick, arched neck and a long, fine-boned head
   c.fillStyle = linear(c, -20, 6, [
-    [0, '#e9e4d8'],
-    [1, '#8c8273'],
+    [0, '#ffffff'],
+    [1, '#c2b9a9'],
   ])
   c.beginPath()
   c.moveTo(8, -5)
@@ -374,7 +377,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.closePath()
   c.fill()
   // shadow under the jaw and down the throat
-  c.strokeStyle = '#5f574d'
+  c.strokeStyle = '#a99f90'
   c.lineWidth = 1.3
   c.beginPath()
   c.moveTo(23, -8)
@@ -413,7 +416,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
     c.stroke()
   }
   // near legs: forearm, knee and cannon, ending in dark hooves with a little feathering above
-  c.strokeStyle = '#b5ab9c'
+  c.strokeStyle = '#e2ddd2'
   c.lineWidth = 3.6
   c.beginPath()
   c.moveTo(-8, 8)
@@ -427,9 +430,9 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.fillRect(-10.5, 17.5 + gallop, 4, 2.6)
   c.fillRect(16, 13.8 - gallop, 4, 2.6)
   // the near wing, rising from the horse's shoulder behind the rider
-  bigWing(c, lift - 5, { primary: '#5f574d', secondary: '#b5ab9c', covert: '#e9e4d8', bar: '#3d3731', edge: '#eef0f4' }, 1.3)
+  bigWing(c, lift - 5, { primary: '#a99f90', secondary: '#e2ddd2', covert: '#ffffff', bar: '#8c8273', edge: '#ffffff' }, 1.3)
   // tack: a burgundy saddle cloth with gold trim, a leather saddle and girth
-  c.fillStyle = '#5a1620'
+  c.fillStyle = '#1d3f8a'
   c.beginPath()
   c.moveTo(-9, -5)
   c.lineTo(7, -5)
@@ -453,8 +456,8 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.stroke()
   // the cape, heavy and dark, its edge torn
   c.fillStyle = linear(c, -22, 0, [
-    [0, '#2f6670'],
-    [1, '#1d3f46'],
+    [0, '#5aa8ff'],
+    [1, '#2a6ad8'],
   ])
   c.beginPath()
   c.moveTo(-1, -20)
@@ -474,9 +477,9 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.lineTo(1, 6)
   c.stroke()
   c.fillStyle = linear(c, -21, -6, [
-    [0, '#c3c8d4'],
-    [0.5, '#6e7587'],
-    [1, '#30343f'],
+    [0, '#ffffff'],
+    [0.5, '#c3c8d4'],
+    [1, '#6e7587'],
   ])
   c.beginPath()
   c.moveTo(-3.5, -20)
@@ -512,7 +515,7 @@ const drawHero = (c: Draw, lift: number, gallop: number) => {
   c.fill()
   c.fillStyle = '#0d0b10'
   c.fillRect(1, -24.5, 4, 1.2)
-  c.strokeStyle = '#80222c'
+  c.strokeStyle = '#29f0ff'
   c.lineWidth = 2.4
   c.beginPath()
   c.moveTo(1, -28.5)
@@ -1728,7 +1731,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       paintBackdrop()
       paintIslands()
       makeClouds()
-      heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop), HERO_PAL, '#c9a46a', '#0d0b10'))
+      heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop), HERO_PAL, '#9fdcff', '#0d0b10'))
       foeFrames = POSES.map(([lift]) => makeFrame((c) => drawFoe(c, lift), FOE_PAL, '#dcbc85', '#0d0607'))
     }
     fit()
@@ -1807,9 +1810,25 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let player = spawnHero()
     let enemies: Rider[] = []
 
+    // Enemies don't all appear at once: each wave queues them up and they fly in one by one, alternating sides,
+    // with a burst of sparks as each arrives. Later waves send them in faster.
+    let arrivals: number[] = []
+    let arrivalTimer = 0
     const startWave = () => {
       const count = Math.min(2 + wave, 7)
-      enemies = Array.from({ length: count }, (_, i) => newRider(((i + 0.5) / count) * W, 50))
+      enemies = []
+      arrivals = Array.from({ length: count }, (_, i) => (i % 2 ? 0.88 - (i >> 1) * 0.12 : 0.12 + (i >> 1) * 0.12) * W)
+      arrivalTimer = 40
+    }
+    const nextArrival = () => {
+      if (!arrivals.length || --arrivalTimer > 0) return
+      const x = arrivals.shift() as number
+      const e = newRider(x, 30)
+      e.dir = x < W / 2 ? 1 : -1
+      e.vx = e.dir * 1.5
+      enemies.push(e)
+      burst(x, 30, 16, ['#7fd6c2', '#d8fff4', '#4a1218'], 2, 2)
+      arrivalTimer = Math.max(45, 120 - wave * 10)
     }
     const reset = () => {
       player = spawnHero()
@@ -2340,6 +2359,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       for (const p of platforms) light(p.x + p.w * (0.3 + p.rocks[0] * 0.4), p.y + 18, 10, 'rgba(41,240,255,A)', 0.22 + Math.sin(t * 0.07 + p.x) * 0.08)
       for (const e of enemies) if (e.alive) light(e.x + e.dir * 9 * SPRITE_SCALE, e.y - 27.5 * SPRITE_SCALE, 7, 'rgba(127,214,194,A)', 0.22)
       for (const f of falls) light(f.x, LAVA_Y - 6, 16, 'rgba(255,140,40,A)', 0.3, offs.near)
+      if (!(player.safe > 0 && Math.floor(t / 4) % 2)) light(player.x, player.y - 4, 16, 'rgba(120,200,255,A)', 0.28)
       const isle = platforms[2]
       if (isle) light(isle.x + isle.w * 0.84, LAVA_Y - 4, 12, 'rgba(201,255,246,A)', 0.25)
       ctx.restore()
@@ -2378,7 +2398,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           }
           collide()
           if (player.y > LAVA_Y) loseLife()
-          if (enemies.every((e) => !e.alive)) {
+          nextArrival()
+          if (!arrivals.length && enemies.every((e) => !e.alive)) {
             wave++
             startWave()
           }
