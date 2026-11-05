@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 // drawn as a 16-bit pixel-art piece. A hero on a winged horse battles sorcerers on griffins above a molten lake.
 // Whoever is higher when they meet wins. When nobody is playing it runs an attract mode where the hero flies itself.
 //
-// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 300 pixels tall on a
+// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 224 lines on a
 // wide screen), then scaled up with hard square pixels. The scenery, islands, clouds, sprites and lettering are
 // painted once as shapes and then snapped to a fixed palette, with checkerboard dithering and one-pixel outlines.
 // Stars, lava, lavafalls, sparks and glints are drawn pixel by pixel every frame.
@@ -36,14 +36,12 @@ const LEDGES = [
   { fx: 0.77, fy: 0.3, fw: 0.18 },
 ]
 
-// The fixed palette everything snaps to, like the limited colour sets of 16-bit consoles.
+// The fixed 32-colour palette everything snaps to, like the limited colour sets of 16-bit consoles.
 const PALETTE = [
-  '#0d0221', '#1a0629', '#2b0a4a', '#3b0f5c', '#4e1a72', '#6a2a86', '#8e2a7e', '#b03a86', '#d4508a', '#e8506a',
-  '#ff6f5a', '#ff8a3d', '#ffa94d', '#ffc65c', '#ffe08a', '#fff6c8', '#ffffff', '#c46a8a', '#a05a98', '#8a4f9e',
-  '#5a2a7a', '#7a52b8', '#a98cf0', '#d7c4ff', '#9fdcff', '#5aa8ff', '#2a6ad8', '#29f0ff', '#1fb8e0', '#c9fff6',
-  '#e8b46a', '#d0964a', '#9a5a2a', '#6b3d1c', '#4a1f10', '#ff3b6b', '#c0102a', '#6d0a2e', '#ff3d7f', '#ffd56b',
-  '#e8dcc8', '#cdbfe0', '#8a9bc8', '#4b3a8f', '#a9b8ff', '#f4f0ff', '#ff9de2', '#b388ff', '#ff5a1f', '#e8250f',
-  '#4a0218', '#14325a', '#1f6a8a', '#3d2a6a',
+  '#0d0221', '#1a0629', '#2b0a4a', '#3b0f5c', '#5a2a7a', '#8e2a7e', '#b03a86', '#d4508a',
+  '#ff6f5a', '#ff8a3d', '#ffc65c', '#ffe08a', '#fff6c8', '#ffffff', '#c46a8a', '#8a4f9e',
+  '#7a52b8', '#a98cf0', '#d7c4ff', '#9fdcff', '#2a6ad8', '#29f0ff', '#1f6a8a', '#e8b46a',
+  '#9a5a2a', '#4a1f10', '#ff3b6b', '#c0102a', '#6d0a2e', '#e8dcc8', '#4b3a8f', '#ff5a1f',
 ]
 const rgb = (h: string) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]
 const PAL = PALETTE.map(rgb)
@@ -944,7 +942,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
 
       c.setTransform(1, 0, 0, 1, 0, 0)
-      quantize(backdrop, 40, false)
+      quantize(backdrop, 20, false)
 
       // single-pixel details added after pixelating, so they stay crisp
       const img = c.getImageData(0, 0, LW, LH)
@@ -1083,7 +1081,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         }
       }
       c.setTransform(1, 0, 0, 1, 0, 0)
-      quantize(islands, 14, true)
+      quantize(islands, 0, true)
       // a bright pixel line along each top edge
       c.fillStyle = '#ffffff'
       for (const p of platforms) c.fillRect(X(p.x - 1), X(p.y) + 1, X(p.w + 2), 1)
@@ -1133,7 +1131,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           ])
           c.fillRect(w * 0.12, h * 0.62, w * 0.76, h * 0.38)
         }
-        quantize(cv, 26, false)
+        quantize(cv, 10, false)
         return { img: cv, x: r() * W, y: H * 0.2 + r() * Math.max(10, horizon - 190 - H * 0.2), speed: 0.04 + r() * 0.06, w: w + 10 }
       })
     }
@@ -1216,7 +1214,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           c.fillText(s, LW / 2, base)
           return Math.min(c.measureText(s).width, max) / 2
         },
-        30,
+        12,
       )
 
     // Smaller text with a dark outline so it reads over any part of the sky.
@@ -1239,7 +1237,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const cw = Math.max(1, rect.width)
       const ch = Math.max(1, rect.height)
       const wide = cw >= ch
-      pixel = Math.max(2, Math.round(wide ? ch / 290 : cw / 200))
+      pixel = Math.max(2, Math.round(wide ? ch / 224 : cw / 170))
       LW = Math.ceil(cw / pixel)
       LH = Math.ceil(ch / pixel)
       if (wide) {
@@ -1348,7 +1346,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       r.vy = FLAP
       r.wing = 8
       if (r === player) {
-        burst(r.x - r.dir * 10, r.y + 4, 3, ['#fff6c8', '#ff9de2'], 1, 1.6)
+        burst(r.x - r.dir * 10, r.y + 4, 3, ['#fff6c8', '#d7c4ff'], 1, 1.6)
         if (mode === 'play') beep(220, 0.05)
       }
     }
@@ -1392,7 +1390,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const loseLife = () => {
       beep(80, 0.4, 'sawtooth')
-      burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffa94d', '#ff5a1f', '#ffe08a'], 3.5, 3)
+      burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffc65c', '#ff5a1f', '#ffe08a'], 3.5, 3)
       if (mode !== 'play') {
         reset()
         return
@@ -1414,7 +1412,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         } else if (player.y < e.y) {
           e.alive = false
           score += 500
-          burst(e.x, e.y, 30, ['#ffe08a', '#ff9de2', '#b388ff', '#ffffff'], 3.2, 2.6)
+          burst(e.x, e.y, 30, ['#ffe08a', '#d7c4ff', '#a98cf0', '#ffffff'], 3.2, 2.6)
           beep(660, 0.15, 'triangle')
         } else if (player.safe === 0) {
           loseLife()
@@ -1433,7 +1431,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // a four-pointed pixel glint
     const glint = (x: number, y: number, arm: number) => {
-      b.fillStyle = '#ff9de2'
+      b.fillStyle = '#d7c4ff'
       b.fillRect(x - arm, y, arm * 2 + 1, 1)
       b.fillRect(x, y - arm, 1, arm * 2 + 1)
       b.fillStyle = '#ffffff'
@@ -1459,7 +1457,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         comet.life--
         comet.x += 9
         comet.y += 3
-        const trail = ['#ffffff', '#fff6c8', '#ffe08a', '#ff9de2', '#a98cf0', '#6a2a86']
+        const trail = ['#ffffff', '#fff6c8', '#ffe08a', '#d7c4ff', '#a98cf0', '#5a2a7a']
         trail.forEach((col, i) => {
           b.fillStyle = col
           b.fillRect(X(comet.x) - i * 3, X(comet.y) - i, 3, 1)
@@ -1502,7 +1500,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const x0 = X(p.x + p.w * 0.84)
       const top = X(p.y + 9)
       const bottom = X(LAVA_Y) - 1
-      const water = ['#c9fff6', '#9fdcff', '#29f0ff', '#ffffff']
+      const water = ['#ffffff', '#9fdcff', '#29f0ff', '#ffffff']
       for (let y = top; y < bottom; y++) {
         const sway = Math.round(Math.sin((y + t * 0.5) * 0.08) * 0.6)
         for (let dx = 0; dx < 2; dx++) {
@@ -1523,7 +1521,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     // molten rock pouring down from the clefts in the near mountains
-    const FALL_COLOURS = ['#fff6c8', '#ffe08a', '#ffa94d', '#ff8a3d', '#ff5a1f', '#ffa94d']
+    const FALL_COLOURS = ['#fff6c8', '#ffe08a', '#ffc65c', '#ff8a3d', '#ff5a1f', '#ffc65c']
     const drawFalls = () => {
       for (const f of falls) {
         const x0 = X(f.x) - 2
@@ -1553,13 +1551,13 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     const LAVA_BANDS: [string, number][] = [
       ['#fff6c8', 1],
       ['#ffe08a', 1],
-      ['#ffa94d', 2],
+      ['#ffc65c', 2],
       ['#ff8a3d', 2],
       ['#ff5a1f', 3],
-      ['#e8250f', 4],
+      ['#c0102a', 4],
       ['#c0102a', 5],
       ['#6d0a2e', 6],
-      ['#4a0218', 99],
+      ['#4a1f10', 99],
     ]
     const surfaceY: number[] = []
     const drawLava = () => {
@@ -1592,7 +1590,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         }
       }
       // bright currents sliding along under the crust
-      b.fillStyle = '#ffa94d'
+      b.fillStyle = '#ffc65c'
       for (let i = 0; i < 8; i++) {
         const cx = Math.floor(((i * 97 + t * (0.3 + (i % 3) * 0.15)) % (LW + 30)) - 15)
         const row = 6 + (i % 4) * 3
@@ -1618,11 +1616,11 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         const cy = X(p.y + 18)
         const bright = Math.sin(t * 0.07 + p.x) > 0
         if (bright) {
-          b.fillStyle = '#1fb8e0'
+          b.fillStyle = '#29f0ff'
           b.fillRect(cx - 2, cy, 5, 1)
           b.fillRect(cx, cy - 3, 1, 7)
         }
-        b.fillStyle = bright ? '#c9fff6' : '#29f0ff'
+        b.fillStyle = bright ? '#ffffff' : '#29f0ff'
         b.fillRect(cx, cy - 2, 1, 5)
         b.fillRect(cx - 1, cy - 1, 3, 3)
       }
