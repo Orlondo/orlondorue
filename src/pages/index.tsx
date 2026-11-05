@@ -24,6 +24,8 @@ function nextFace(): Face {
 
 export default function Home() {
   const [face, setFace] = useState<Face | null>(null)
+  // when the background is the SkyRiders game, the name and tagline step aside so they don't sit over it
+  const [game, setGame] = useState(false)
   useEffect(() => setFace(nextFace()), [])
   const family = face === 'mono' ? 'font-[family-name:var(--font-mono-face)]' : 'font-[family-name:var(--font-sans)]'
 
@@ -49,9 +51,11 @@ export default function Home() {
         />
       </Head>
       <main className={`${sans.variable} ${mono.variable} relative h-dvh w-full overflow-hidden bg-[#0b0c0f] text-white`}>
-        <RandomBackground />
+        <RandomBackground onPick={(type) => setGame(type === 'game')} />
         <div
-          className={`${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-7 bottom-8 sm:inset-x-10 sm:bottom-10`}
+          className={
+            game ? 'sr-only' : `${face ? 'rise' : 'opacity-0'} ${family} absolute inset-x-7 bottom-8 sm:inset-x-10 sm:bottom-10`
+          }
         >
           <h1 className="text-sm font-light uppercase tracking-[0.4em] text-white/80 sm:text-lg">
             Orlondo Rue
