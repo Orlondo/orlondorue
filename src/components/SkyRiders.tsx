@@ -1857,9 +1857,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let dawn = 0 // frames of Dawn Shard left
     let ward = false
 
-    // A body left behind by a death: `tumble` spins and falls out of the sky; `sink` goes down slowly into the
-    // lava, swallowed by the surface, with flames and steam rising off it.
-    type Body = { hero: boolean; dir: number; x: number; y: number; vx: number; vy: number; rot: number; vr: number; kind: 'tumble' | 'sink'; life: number }
+    // A body left behind by a death: `fall` is a rider struck in a clash, flashing white, then going limp and falling
+    // nose-down out of the sky; `sink` goes down slowly into the lava, swallowed by the surface, with flames and steam.
+    type Body = { hero: boolean; dir: number; x: number; y: number; vx: number; vy: number; rot: number; vr: number; kind: 'fall' | 'sink'; life: number; flash: number }
     let bodies: Body[] = []
     let heroDown = 0 // frames until the hero comes back after a death
 
@@ -2007,23 +2007,31 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     const enemyAI = (e: Rider) => {
-      // each sorcerer patrols at its own height and only climbs to strike when the hero comes close
-      const near = Math.abs(player.x - e.x) < W * 0.2
-      const target = near ? Math.min(player.y - 20, LAVA_Y - 70) : Math.min(e.aim, LAVA_Y - 60)
-      if (e.y > target && Math.random() < 0.08) flap(e)
-      e.vx += Math.sign(player.x - e.x) * (near ? 0.05 : 0.025)
+      // each sorcerer patrols at its own height and only climbs to strike when the hero comes close.
+      // In attract mode they're half-hearted: they notice the hero later, chase lazily and don't fight for
+      // the high ground, so the demo knight wins most of his clashes.
+      const demo = mode === 'attract'
+      const near = Math.abs(player.x - e.x) < W * (demo ? 0.1 : 0.2)
+      const target = near ? Math.min(player.y - (demo ? 2 : 20), LAVA_Y - 70) : Math.min(e.aim, LAVA_Y - 60)
+      if (e.y > target && Math.random() < (demo ? 0.07 : 0.08)) flap(e)
+      e.vx += Math.sign(player.x - e.x) * (near ? (demo ? 0.025 : 0.05) : demo ? 0.012 : 0.025)
       e.dir = Math.sign(e.vx) || 1
     }
 
     // The hero flies itself in attract mode: get above the nearest sorcerer, then dive on them.
     const demoAI = () => {
       // chase a falling ember first, then a power-up, otherwise get above the nearest sorcerer and dive
-      const ember = embers.find((em) => em.sunk === 0)
+      // (but give up on an ember that's about to sink, and never aim low enough to risk the lava)
+      const safe = LAVA_Y - 55
+      const ember = embers.find((em) => em.sunk === 0 && em.y < safe)
       const target = ember ? { x: ember.x, y: ember.y + 6 } : power ? { x: power.x, y: power.y } : null
       const foe = enemies.find((e) => e.alive)
       if (!target && !foe) return
       const aim = target ?? { x: foe!.x, y: foe!.y - 25 }
-      if ((player.y > aim.y || player.y > LAVA_Y - 45) && Math.random() < 0.14) flap(player)
+      aim.y = Math.min(aim.y, safe)
+      // near the lava, beat the wings hard to climb away from it
+      if (player.y > safe && Math.random() < 0.6) flap(player)
+      else if (player.y > aim.y && Math.random() < 0.14) flap(player)
       player.vx += Math.sign(aim.x - player.x) * 0.08
       player.dir = Math.sign(player.vx) || 1
     }
@@ -2045,21 +2053,21 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    // knocked out of the sky in a clash
-    const tumbleDeath = (r: Rider, hero: boolean, from: number) => {
-      bodies.push({ hero, dir: r.dir, x: r.x, y: r.y, vx: Math.sign(r.x - from || 1) * 2.2, vy: -3, rot: 0, vr: (Math.random() < 0.5 ? -1 : 1) * 0.18, kind: 'tumble', life: 200 })
-      if (hero) {
-        burst(r.x, r.y, 24, ['#ffffff', '#e2ddd2', '#c2b9a9'], 2.6, 2) // white feathers
-        burst(r.x, r.y, 14, ['#9fdcff', '#5aa8ff'], 3.4, 1.6) // a flash of blue
-      } else {
-        burst(r.x, r.y, 26, ['#94653a', '#c79c63', '#45291b', '#dcbc85'], 2.8, 2) // brown and gold feathers
-        float(r.x, r.y - 10, 18, ['#7fd6c2', '#4a1218', '#2f6a60', '#d8fff4'], 1.2, 12) // the sorcerer dissolving
+    // struck down in a clash: a hard white flash at the moment of the blow, a few loose feathers, then the body
+    // goes limp, its wings fold, and it falls away nose-down until the lava takes it
+    const fallDeath = (r: Rider, hero: boolean, from: number) => {
+      bodies.push({ hero, dir: r.dir, x: r.x, y: r.y, vx: r.vx * 0.3 + Math.sign(r.x - from || 1) * 0.7, vy: -1, rot: 0, vr: 0, kind: 'fall', life: 260, flash: 7 })
+      const feathers = hero ? ['#ffffff', '#e2ddd2', '#c2b9a9'] : ['#94653a', '#c79c63', '#45291b']
+      for (let i = 0; i < 10; i++) {
+        const max = 50 + Math.random() * 40
+        sparks.push({ x: r.x + (Math.random() - 0.5) * 10, y: r.y + (Math.random() - 0.5) * 8, vx: (Math.random() - 0.5) * 1.6, vy: -0.6 - Math.random() * 0.8, life: max, max, color: feathers[i % 3], size: 1.6, g: 0.025 })
       }
+      if (!hero) float(r.x, r.y - 10, 16, ['#7fd6c2', '#4a1218', '#2f6a60', '#d8fff4'], 1, 10) // the sorcerer dissolving
     }
 
     // swallowed by the lava
     const lavaDeath = (r: Rider, hero: boolean) => {
-      bodies.push({ hero, dir: r.dir, x: r.x, y: LAVA_Y - 10, vx: r.vx * 0.2, vy: 0, rot: 0, vr: 0, kind: 'sink', life: 90 })
+      bodies.push({ hero, dir: r.dir, x: r.x, y: LAVA_Y - 10, vx: r.vx * 0.2, vy: 0, rot: 0, vr: 0, kind: 'sink', life: 90, flash: 0 })
       const molten = ['#fff6c8', '#ffc65c', '#ff8a3d', '#ff5a1f']
       for (let i = 0; i < 22; i++) {
         const max = 25 + Math.random() * 25
@@ -2070,12 +2078,23 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     const updateBodies = () => {
       for (const bd of bodies) {
         bd.life--
-        if (bd.kind === 'tumble') {
-          bd.vy += 0.16
+        if (bd.kind === 'fall') {
+          if (bd.flash > 0) {
+            // hold for a beat at the moment of the blow
+            bd.flash--
+            continue
+          }
+          bd.vy = Math.min(5.5, bd.vy + 0.12)
+          bd.vx *= 0.99
           bd.x += bd.vx
           bd.y += bd.vy
-          bd.rot += bd.vr
-          if (t % 4 === 0) float(bd.x, bd.y, 1, bd.hero ? ['#ffffff'] : ['#45291b', '#2e1d16'], 0.4, 6, 1.2)
+          // the head drops as it falls, settling nose-down rather than spinning
+          bd.rot += (bd.dir * 1.15 - bd.rot) * 0.045
+          if (t % 3 === 0) float(bd.x, bd.y - 4, 1, ['#3b0f5c', '#1a0629'], 0.5, 6, 1.6) // a thin trail of smoke
+          if (t % 9 === 0) {
+            const max = 60
+            sparks.push({ x: bd.x, y: bd.y, vx: (Math.random() - 0.5) * 1.2, vy: -1.2, life: max, max, color: bd.hero ? '#e2ddd2' : '#94653a', size: 1.6, g: 0.02 })
+          }
           if (bd.y > LAVA_Y) {
             // it hits the lava and is gone in a splash
             lavaDeath({ ...player, x: bd.x, vx: 0, dir: bd.dir }, bd.hero)
@@ -2095,10 +2114,10 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const loseLife = (cause: 'clash' | 'lava', from = player.x) => {
       beep(cause === 'lava' ? 60 : 80, 0.45, 'sawtooth')
-      shake = Math.max(shake, cause === 'lava' ? 7 : 9)
-      freeze = cause === 'clash' ? 6 : 0
+      shake = Math.max(shake, cause === 'lava' ? 7 : 6)
+      freeze = cause === 'clash' ? 8 : 0
       if (cause === 'lava') lavaDeath(player, true)
-      else tumbleDeath(player, true, from)
+      else fallDeath(player, true, from)
       dawn = 0
       ward = false
       heroDown = 100
@@ -2115,7 +2134,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     const collide = () => {
       for (const e of enemies) {
         if (!e.alive || Math.hypot(e.x - player.x, e.y - player.y) > REACH) continue
-        if (dawn === 0 && Math.abs(e.y - player.y) < 5) {
+        // in attract mode the demo knight gets some slack: a clash he loses narrowly is a stand-off instead
+        const even = mode === 'attract' ? player.y - e.y < 16 && e.y - player.y < 5 : Math.abs(e.y - player.y) < 5
+        if (dawn === 0 && even) {
           // dead even: both bounce off
           player.vx = -player.vx * 1.5 || -3
           e.vx = -e.vx * 1.5 || 3
@@ -2124,7 +2145,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           beep(110)
         } else if (dawn > 0 || player.y < e.y) {
           e.alive = false
-          tumbleDeath(e, false, player.x)
+          fallDeath(e, false, player.x)
           embers.push({ x: e.x, y: e.y, vy: 1.8, t: 0, sunk: 0 })
           score += 500
           shake = Math.max(shake, 5)
@@ -2441,23 +2462,77 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     }
 
     // a power-up: a slowly turning crystal, gold for the Dawn Shard, blue for the Ward
+    // The two power-ups look nothing alike: the Dawn Shard is a small radiant sun with pulsing rays and a halo;
+    // the Ward is a blue kite shield with a white emblem, circled by a slowly turning ring.
+    const drawPowerIcon = (kind: Power['kind'], x: number, y: number, small = false) => {
+      const px = (dx: number, dy: number, col: string, w = 1, h = 1) => {
+        b.fillStyle = col
+        b.fillRect(x + dx, y + dy, w, h)
+      }
+      if (kind === 'dawn') {
+        if (!small) {
+          // the halo, then eight rays that lengthen and shorten
+          const pulse = (t >> 3) % 2
+          b.fillStyle = '#ff8a3d'
+          for (let a = 0; a < 20; a++) {
+            if ((a + (t >> 2)) % 5 === 0) continue
+            const ang = (a / 20) * Math.PI * 2
+            b.fillRect(Math.round(x + Math.cos(ang) * 7), Math.round(y + Math.sin(ang) * 7), 1, 1)
+          }
+          for (let r = 0; r < 8; r++) {
+            const ang = (r / 8) * Math.PI * 2
+            const len = 3 + ((r + pulse) % 2) * 2
+            for (let d = 4; d < 4 + len; d++) px(Math.round(Math.cos(ang) * d), Math.round(Math.sin(ang) * d), d < 5 ? '#ffe08a' : '#ffc65c')
+          }
+        }
+        // the sun's disc
+        px(-2, -1, '#ff8a3d', 5, 3)
+        px(-1, -2, '#ff8a3d', 3, 5)
+        px(-1, -1, '#ffc65c', 3, 3)
+        px(0, -1, '#fff6c8', 1, 2)
+        px(-1, 0, '#fff6c8', 2, 1)
+      } else {
+        if (!small) {
+          // the turning ring
+          b.fillStyle = (t >> 3) % 2 ? '#9fdcff' : '#5aa8ff'
+          for (let a = 0; a < 18; a++) {
+            if ((a + (t >> 2)) % 3 === 0) continue
+            const ang = (a / 18) * Math.PI * 2
+            b.fillRect(Math.round(x + Math.cos(ang) * 8), Math.round(y + Math.sin(ang) * 8), 1, 1)
+          }
+        }
+        // a kite shield: dark rim, blue face, a lit left edge and a white chevron
+        const rows = [
+          [-3, 7],
+          [-3, 7],
+          [-3, 7],
+          [-3, 7],
+          [-2, 5],
+          [-2, 5],
+          [-1, 3],
+          [0, 1],
+        ]
+        rows.forEach(([dx, w], i) => {
+          px(dx - 1, i - 4, '#1d3f8a', w + 2, 1)
+        })
+        px(-4, -5, '#1d3f8a', 9, 1)
+        rows.forEach(([dx, w], i) => {
+          px(dx, i - 4, '#5aa8ff', w, 1)
+          px(dx, i - 4, '#9fdcff', 1, 1)
+        })
+        px(-2, -3, '#ffffff', 1, 1)
+        px(-1, -2, '#ffffff', 1, 1)
+        px(0, -1, '#ffffff', 1, 1)
+        px(1, -2, '#ffffff', 1, 1)
+        px(2, -3, '#ffffff', 1, 1)
+      }
+    }
+
     const drawPower = () => {
       if (!power) return
       if (power.life < 120 && (power.life >> 2) % 2) return // blink before it fades away
-      const x = X(power.x)
-      const y = X(power.y) + Math.round(Math.sin(t * 0.08) * 1.5)
-      const [edge, face, core] = power.kind === 'dawn' ? ['#ff8a3d', '#ffc65c', '#fff6c8'] : ['#2a6ad8', '#5aa8ff', '#d8fff4']
-      const turn = (t >> 3) % 4
-      const w = [2, 1, 2, 3][turn]
-      b.fillStyle = edge
-      b.fillRect(x - w - 1, y - 1, w * 2 + 3, 3)
-      b.fillRect(x - 1, y - 5, 3, 11)
-      b.fillStyle = face
-      b.fillRect(x - w, y - 1, w * 2 + 1, 3)
-      b.fillRect(x, y - 4, 1, 9)
-      b.fillStyle = core
-      b.fillRect(x, y - 1, 1, 2)
-      if ((t >> 4) % 2) glint(x + 2, y - 4, 1)
+      drawPowerIcon(power.kind, X(power.x), X(power.y) + Math.round(Math.sin(t * 0.08) * 1.5))
+      if ((t >> 4) % 2) glint(X(power.x) + 3, X(power.y) - 5, 1)
     }
 
     // the hero's powers: a ring of blue for the Ward, a trail of gold sparks under the Dawn Shard
@@ -2487,11 +2562,31 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
+    // a solid white copy of a sprite, for the flash at the moment a rider is struck
+    const flashes = new Map<HTMLCanvasElement, HTMLCanvasElement>()
+    const whiteOf = (img: HTMLCanvasElement) => {
+      let w = flashes.get(img)
+      if (!w) {
+        w = document.createElement('canvas')
+        w.width = img.width
+        w.height = img.height
+        const c = w.getContext('2d')
+        if (c) {
+          c.drawImage(img, 0, 0)
+          c.globalCompositeOperation = 'source-in'
+          c.fillStyle = '#ffffff'
+          c.fillRect(0, 0, w.width, w.height)
+        }
+        flashes.set(img, w)
+      }
+      return w
+    }
+
     const drawBodies = () => {
       for (const bd of bodies) {
+        // the wings swept up and back, as a falling body's are
         const f = (bd.hero ? heroFrames : foeFrames)[0]
         if (!f) continue
-        if (bd.kind === 'tumble' && bd.life < 30 && bd.life % 4 < 2) continue
         b.save()
         if (bd.kind === 'sink') {
           // only the part still above the lava shows
@@ -2501,9 +2596,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         }
         b.imageSmoothingEnabled = false
         b.translate(X(bd.x), X(bd.y))
-        if (bd.kind === 'tumble') b.rotate(Math.round(bd.rot / (Math.PI / 8)) * (Math.PI / 8)) // turn in chunky steps
+        if (bd.kind === 'fall') b.rotate(Math.round(bd.rot / (Math.PI / 16)) * (Math.PI / 16)) // turn in chunky steps
         b.scale(bd.dir, 1)
-        b.drawImage(f.img, -f.ox, -f.oy)
+        b.drawImage(bd.flash > 0 && bd.flash % 3 !== 0 ? whiteOf(f.img) : f.img, -f.ox, -f.oy)
         b.restore()
       }
     }
@@ -2519,13 +2614,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const x = X(cr.x)
       const y = X(cr.y)
       b.drawImage(frame, x - Math.round(frame.width / 2), y - Math.round(frame.height / 2))
-      if (!cr.dropped && grow > 0.4) {
-        const [edge, face] = cr.kind === 'dawn' ? ['#ff8a3d', '#ffc65c'] : ['#2a6ad8', '#9fdcff']
-        b.fillStyle = edge
-        b.fillRect(x - 1, y + Math.round(frame.height / 2) - 1, 3, 4)
-        b.fillStyle = face
-        b.fillRect(x, y + Math.round(frame.height / 2), 1, 2)
-      }
+      if (!cr.dropped && grow > 0.4) drawPowerIcon(cr.kind, x, y + Math.round(frame.height / 2) + 3, true)
     }
 
     const drawRider = (r: Rider, hero: boolean) => {
@@ -2791,6 +2880,20 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       if (mode === 'play') {
         place(caption(`Score ${score}`, 17, 'left'), 32)
         place(caption(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, 17, 'right'), 32)
+        // the powers you're carrying, under the hearts: a shield for the Ward, a sun and its fading bar for the Dawn Shard
+        let ix = LW - 10
+        const iy = X(32) + 10
+        if (ward) {
+          drawPowerIcon('ward', ix, iy, true)
+          ix -= 14
+        }
+        if (dawn > 0 && (dawn > 90 || (dawn >> 2) % 2)) {
+          drawPowerIcon('dawn', ix, iy, true)
+          b.fillStyle = '#1a0629'
+          b.fillRect(ix - 4, iy + 5, 9, 2)
+          b.fillStyle = '#ffc65c'
+          b.fillRect(ix - 4, iy + 5, Math.max(1, Math.round((dawn / 420) * 9)), 1)
+        }
       } else if (mode === 'attract') {
         drawLogo(top)
         place(ornate('of the Velvet Sunset', 17), top + 50)
