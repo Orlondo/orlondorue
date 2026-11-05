@@ -1,22 +1,29 @@
 import { useEffect, useRef } from 'react'
 
-// SkyRiders of the Velvet Sunset: an original flap-and-collide arcade game with a 70s airbrushed van-mural look.
-// A hero on a winged horse battles sorcerers on griffins above a molten lake. Whoever is higher when they meet wins.
-// When nobody is playing it runs an attract mode where the hero flies itself.
+// SkyRiders of the Velvet Sunset: an original flap-and-collide arcade game with a 70s van-mural sunset,
+// drawn in a 16-bit console style. A hero on a winged horse battles sorcerers on griffins above a molten lake.
+// Whoever is higher when they meet wins. When nobody is playing it runs an attract mode where the hero flies itself.
 //
-// The game fills whatever box it is given. The world is 500 units tall on wide screens and 400 units wide on tall
-// ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
-// The scenery that never moves (sky, sun, planets, mountains) is painted once into a backdrop whenever the size
-// changes; only the riders, lava, stars and sparks are drawn every frame.
+// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 240 pixels tall on a
+// wide screen), then scaled up with hard square pixels. The painted scenery, the sprites and the lettering are drawn
+// once, then snapped to a fixed palette, with checkerboard dithering on the scenery and dark outlines on the sprites.
+// Stars, lava, sparks and glints are drawn pixel by pixel every frame.
+//
+// The game fills whatever box it is given. The game world is 500 units tall on wide screens and 400 units wide on
+// tall ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
 
 const GRAVITY = 0.22
 const FLAP = -4.2
+const SPRITE_SCALE = 1.3
 
 type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number }
 type Mode = 'attract' | 'play' | 'over'
 type Platform = { x: number; y: number; w: number; rocks: number[] }
 type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: number; color: string; size: number }
-type Star = { x: number; y: number; r: number; phase: number; burst: boolean }
+type Star = { x: number; y: number; phase: number; burst: boolean }
+type Frame = { img: HTMLCanvasElement; ox: number; oy: number }
+type Label = { img: HTMLCanvasElement; base: number; half: number }
+type Draw = CanvasRenderingContext2D
 
 // Ledges as fractions of the world, so they spread out on any screen shape.
 const LEDGES = [
@@ -27,11 +34,245 @@ const LEDGES = [
   { fx: 0.77, fy: 0.3, fw: 0.18 },
 ]
 
+// The fixed palette everything snaps to, like the limited colour sets of 16-bit consoles.
+const PALETTE = [
+  '#0d0221', '#1a0629', '#2b0a4a', '#3b0f5c', '#4e1a72', '#6a2a86', '#8e2a7e', '#b03a86', '#d4508a', '#e8506a',
+  '#ff6f5a', '#ff8a3d', '#ffa94d', '#ffc65c', '#ffe08a', '#fff6c8', '#ffffff', '#c46a8a', '#a05a98', '#8a4f9e',
+  '#5a2a7a', '#7a52b8', '#a98cf0', '#d7c4ff', '#9fdcff', '#5aa8ff', '#2a6ad8', '#29f0ff', '#1fb8e0', '#c9fff6',
+  '#e8b46a', '#d0964a', '#9a5a2a', '#6b3d1c', '#4a1f10', '#ff3b6b', '#c0102a', '#6d0a2e', '#ff3d7f', '#ffd56b',
+  '#e8dcc8', '#cdbfe0', '#8a9bc8', '#4b3a8f', '#a9b8ff', '#f4f0ff', '#ff9de2', '#b388ff', '#ff5a1f', '#e8250f',
+  '#4a0218',
+]
+const rgb = (h: string) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]
+const PAL = PALETTE.map(rgb)
+const OUTLINE = rgb('#1a0629')
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
+
+const nearest = (r: number, g: number, b: number) => {
+  let best = 0
+  let bestD = Infinity
+  for (let i = 0; i < PAL.length; i++) {
+    const [pr, pg, pb] = PAL[i]
+    const d = 2 * (r - pr) ** 2 + 4 * (g - pg) ** 2 + 3 * (b - pb) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = i
+    }
+  }
+  return best
+}
+
+// Snap a canvas to the palette. Soft edges become hard, `dither` adds the checkerboard blend between colours,
+// and `outline` rings every shape with a dark one-pixel border.
+const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean) => {
+  const g = cv.getContext('2d')
+  const { width: w, height: h } = cv
+  if (!g || !w || !h) return
+  const img = g.getImageData(0, 0, w, h)
+  const d = img.data
+  const solid = new Uint8Array(w * h)
+  const memo = new Map<number, number>()
+  const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x
+      const i = p * 4
+      if (d[i + 3] < 128) {
+        d[i + 3] = 0
+        continue
+      }
+      solid[p] = 1
+      const off = dither ? (BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.47) * dither : 0
+      const r = clamp(d[i] + off)
+      const gg = clamp(d[i + 1] + off)
+      const b = clamp(d[i + 2] + off)
+      const key = ((r >> 2) << 12) | ((gg >> 2) << 6) | (b >> 2)
+      let best = memo.get(key)
+      if (best === undefined) {
+        best = nearest(r, gg, b)
+        memo.set(key, best)
+      }
+      const c = PAL[best]
+      d[i] = c[0]
+      d[i + 1] = c[1]
+      d[i + 2] = c[2]
+      d[i + 3] = 255
+    }
+  }
+  if (outline) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x
+        if (solid[p]) continue
+        const near =
+          (x > 0 && solid[p - 1]) || (x < w - 1 && solid[p + 1]) || (y > 0 && solid[p - w]) || (y < h - 1 && solid[p + w])
+        if (!near) continue
+        const i = p * 4
+        d[i] = OUTLINE[0]
+        d[i + 1] = OUTLINE[1]
+        d[i + 2] = OUTLINE[2]
+        d[i + 3] = 255
+      }
+    }
+  }
+  g.putImageData(img, 0, 0)
+}
+
 // Repeatable pseudo-random numbers, so the mountains and stars look the same on every visit.
 const seeded = (seed: number) => () => {
   seed = (seed * 16807) % 2147483647
   return (seed - 1) / 2147483646
 }
+
+// ---- sprite art, drawn as shapes and then pixelated ----
+
+// A feathered wing; `lift` raises it for a flap or lowers it for a glide.
+const wing = (c: Draw, lift: number, light: string, dark: string, tip: string) => {
+  for (let k = 0; k < 4; k++) {
+    const g = c.createLinearGradient(0, -4, -30, lift - 10)
+    g.addColorStop(0, light)
+    g.addColorStop(0.7, dark)
+    g.addColorStop(1, tip)
+    c.fillStyle = g
+    c.beginPath()
+    c.moveTo(4 - k * 3, -2)
+    c.quadraticCurveTo(-6 - k * 4, lift - 18 + k * 4, -24 + k * 3, lift - 10 + k * 6)
+    c.quadraticCurveTo(-10 - k * 2, lift - 2 + k * 3, 2 - k * 3, 2)
+    c.closePath()
+    c.fill()
+  }
+}
+
+// Hero: a pale winged horse with a golden mane and a rider in a flowing cyan cape.
+const drawHero = (c: Draw, lift: number, gallop: number) => {
+  c.strokeStyle = '#ffd56b'
+  c.lineWidth = 4
+  c.lineCap = 'round'
+  c.beginPath()
+  c.moveTo(-15, 2)
+  c.quadraticCurveTo(-26, -2 + gallop, -32, 9)
+  c.stroke()
+  c.strokeStyle = '#e8dcc8'
+  c.lineWidth = 3
+  c.beginPath()
+  c.moveTo(-8, 8)
+  c.lineTo(-12, 15 + gallop)
+  c.moveTo(8, 8)
+  c.lineTo(12, 14 - gallop)
+  c.stroke()
+  const body = c.createLinearGradient(0, -6, 0, 12)
+  body.addColorStop(0, '#ffffff')
+  body.addColorStop(1, '#cdbfe0')
+  c.fillStyle = body
+  c.beginPath()
+  c.ellipse(0, 3, 17, 8, 0, 0, Math.PI * 2)
+  c.fill()
+  c.beginPath()
+  c.moveTo(10, -1)
+  c.quadraticCurveTo(17, -10, 21, -14)
+  c.lineTo(27, -11)
+  c.quadraticCurveTo(28, -8, 25, -7)
+  c.lineTo(20, -6)
+  c.quadraticCurveTo(18, 2, 13, 6)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#2b0a4a'
+  c.fillRect(21.5, -12.5, 2.5, 2.5)
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 3.5
+  c.beginPath()
+  c.moveTo(20, -14)
+  c.quadraticCurveTo(13, -12 + gallop * 0.5, 9, -3)
+  c.stroke()
+  c.fillStyle = '#29f0ff'
+  c.beginPath()
+  c.moveTo(-1, -16)
+  c.quadraticCurveTo(-14, -14 + gallop, -24, -6 + gallop)
+  c.quadraticCurveTo(-12, -6, 1, -6)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#1fb8e0'
+  c.fillRect(-3, -15, 7, 11)
+  const helm = c.createRadialGradient(0, -20, 0, 1, -18, 5)
+  helm.addColorStop(0, '#ffffff')
+  helm.addColorStop(1, '#8a9bc8')
+  c.fillStyle = helm
+  c.beginPath()
+  c.arc(1, -18, 4.5, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = '#ffffff'
+  c.lineWidth = 2.5
+  c.beginPath()
+  c.moveTo(3, -9)
+  c.lineTo(24, -16)
+  c.stroke()
+  wing(c, lift, '#ffffff', '#ffe08a', '#ff9de2')
+}
+
+// Foe: a bronze griffin with an eagle head, ridden by a hooded sorcerer with a glowing staff.
+const drawFoe = (c: Draw, lift: number) => {
+  c.strokeStyle = '#6b3d1c'
+  c.lineWidth = 2.5
+  c.beginPath()
+  c.moveTo(-15, 2)
+  c.quadraticCurveTo(-25, 6, -28, -2)
+  c.stroke()
+  const body = c.createLinearGradient(0, -6, 0, 12)
+  body.addColorStop(0, '#d0964a')
+  body.addColorStop(1, '#6b3d1c')
+  c.fillStyle = body
+  c.beginPath()
+  c.ellipse(0, 3, 16, 8, 0, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#f4f0ff'
+  c.beginPath()
+  c.arc(16, -6, 6, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#ffa94d'
+  c.beginPath()
+  c.moveTo(21, -8)
+  c.quadraticCurveTo(28, -7, 25, -2)
+  c.lineTo(21, -4)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#c0102a'
+  c.fillRect(16.5, -8.5, 2.5, 2.5)
+  const robe = c.createLinearGradient(0, -24, 0, -2)
+  robe.addColorStop(0, '#ff3b6b')
+  robe.addColorStop(1, '#6d0a2e')
+  c.fillStyle = robe
+  c.beginPath()
+  c.moveTo(1, -26)
+  c.lineTo(8, -3)
+  c.lineTo(-7, -3)
+  c.closePath()
+  c.fill()
+  c.fillStyle = '#1a0629'
+  c.beginPath()
+  c.arc(1.5, -16, 3, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = '#4a1f10'
+  c.lineWidth = 2.5
+  c.beginPath()
+  c.moveTo(6, -4)
+  c.lineTo(12, -24)
+  c.stroke()
+  c.fillStyle = '#b388ff'
+  c.beginPath()
+  c.arc(12, -26, 4.5, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#ffffff'
+  c.fillRect(11, -27.5, 2, 2)
+  wing(c, lift, '#e8b46a', '#9a5a2a', '#4a1f10')
+}
+
+// Wing positions for the animation frames: a flap, then three glide poses.
+const POSES: [number, number][] = [
+  [-15, 0],
+  [5, 2],
+  [2, 0],
+  [-1, -2],
+]
 
 export default function SkyRiders({ className = 'block h-full w-full' }: { className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -40,27 +281,283 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     const canvas = ref.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const buffer = document.createElement('canvas')
+    const b = buffer.getContext('2d')
+    if (!ctx || !b) return
+    canvas.style.imageRendering = 'pixelated'
 
-    // ---- world size, matched to the screen ----
+    // ---- sizes: the game world, the low-res buffer, and how big each buffer pixel is on screen ----
     let W = 800
     let H = 500
     let LAVA_Y = H - 40
-    let scale = 1
+    let LW = 360 // buffer width and height in pixels
+    let LH = 225
+    let k = LH / H // world units to buffer pixels
+    let pixel = 4 // screen pixels per buffer pixel
     let platforms: Platform[] = []
     let stars: Star[] = []
+    let heroFrames: Frame[] = []
+    let foeFrames: Frame[] = []
     const backdrop = document.createElement('canvas')
+    const labels = new Map<string, Label>()
+
+    const X = (wx: number) => Math.round(wx * k)
+
+    // ---- the painted scenery, drawn once per screen size and then pixelated with dithering ----
+    const paintBackdrop = () => {
+      const c = backdrop.getContext('2d')
+      if (!c) return
+      c.setTransform(k, 0, 0, k, 0, 0)
+      const horizon = LAVA_Y - 40
+
+      const sky = c.createLinearGradient(0, 0, 0, horizon)
+      sky.addColorStop(0, '#0d0221')
+      sky.addColorStop(0.3, '#3b0f5c')
+      sky.addColorStop(0.55, '#8e2a7e')
+      sky.addColorStop(0.78, '#e8506a')
+      sky.addColorStop(0.92, '#ff8a3d')
+      sky.addColorStop(1, '#ffc65c')
+      c.fillStyle = sky
+      c.fillRect(0, 0, W, H)
+
+      // the big striped sunset sun, with a halo behind it
+      const sunR = Math.min(W, H) * 0.24
+      const sunX = W / 2
+      const sunY = horizon - sunR * 0.35
+      const halo = c.createRadialGradient(sunX, sunY, sunR * 0.6, sunX, sunY, sunR * 2.2)
+      halo.addColorStop(0, 'rgba(255,200,120,0.55)')
+      halo.addColorStop(1, 'rgba(255,110,120,0)')
+      c.fillStyle = halo
+      c.fillRect(0, 0, W, H)
+      const sg = c.createLinearGradient(0, sunY - sunR, 0, sunY + sunR)
+      sg.addColorStop(0, '#fff6c8')
+      sg.addColorStop(0.45, '#ffc65c')
+      sg.addColorStop(0.75, '#ff8a3d')
+      sg.addColorStop(1, '#ff3d7f')
+      c.save()
+      c.beginPath()
+      c.arc(sunX, sunY, sunR, 0, Math.PI * 2)
+      c.clip()
+      c.fillStyle = sg
+      c.fillRect(sunX - sunR, sunY - sunR, sunR * 2, sunR * 2)
+      // the stripes across the sun, thicker and closer together toward the bottom, sized in whole buffer pixels
+      c.fillStyle = '#d4508a'
+      for (let i = 0, y = sunY - sunR * 0.72; i < 7 && y < sunY + sunR; i++) {
+        const rows = 1 + Math.floor(i / 2)
+        c.fillRect(sunX - sunR, Math.round(y * k) / k, sunR * 2, rows / k)
+        y += (rows + Math.max(2, 5 - i)) / k
+      }
+      c.restore()
+
+      // a ringed planet and a small moon
+      const px = W * 0.8
+      const py = H * 0.17
+      const pr = 30
+      c.save()
+      c.translate(px, py)
+      c.rotate(-0.35)
+      c.strokeStyle = '#c46a8a'
+      c.lineWidth = 5
+      c.beginPath()
+      c.ellipse(0, 0, pr * 2, pr * 0.42, 0, Math.PI, Math.PI * 2)
+      c.stroke()
+      const pg = c.createRadialGradient(-pr * 0.4, -pr * 0.45, pr * 0.1, 0, 0, pr)
+      pg.addColorStop(0, '#f4f0ff')
+      pg.addColorStop(0.5, '#a9b8ff')
+      pg.addColorStop(1, '#4b3a8f')
+      c.fillStyle = pg
+      c.beginPath()
+      c.arc(0, 0, pr, 0, Math.PI * 2)
+      c.fill()
+      c.strokeStyle = '#ffc65c'
+      c.beginPath()
+      c.ellipse(0, 0, pr * 2, pr * 0.42, 0, 0, Math.PI)
+      c.stroke()
+      c.restore()
+      const mg = c.createRadialGradient(W * 0.14 - 4, H * 0.12 - 4, 1, W * 0.14, H * 0.12, 12)
+      mg.addColorStop(0, '#ffffff')
+      mg.addColorStop(1, '#a05a98')
+      c.fillStyle = mg
+      c.beginPath()
+      c.arc(W * 0.14, H * 0.12, 12, 0, Math.PI * 2)
+      c.fill()
+
+      // long clouds lit from below
+      const rand = seeded(11)
+      for (let i = 0; i < 6; i++) {
+        const cx = rand() * W
+        const cy = horizon * (0.45 + rand() * 0.4)
+        const cw = W * (0.18 + rand() * 0.25)
+        const ch = 6 + rand() * 4
+        c.fillStyle = '#d4508a'
+        c.beginPath()
+        c.ellipse(cx, cy, cw / 2, ch, 0, 0, Math.PI * 2)
+        c.fill()
+        c.fillStyle = '#ffa94d'
+        c.beginPath()
+        c.ellipse(cx + cw * 0.05, cy + ch * 0.45, cw * 0.4, ch * 0.45, 0, 0, Math.PI * 2)
+        c.fill()
+      }
+
+      // two ranges of jagged mountains, each with a lit rim
+      const range = (seed: number, base: number, height: number, step: number, top: string, low: string, rim: string) => {
+        const r = seeded(seed)
+        const pts: [number, number][] = []
+        for (let x = -step; x <= W + step; x += step) pts.push([x + (r() - 0.5) * step * 0.6, base - height * (0.35 + r() * 0.65)])
+        const g = c.createLinearGradient(0, base - height, 0, base)
+        g.addColorStop(0, top)
+        g.addColorStop(1, low)
+        c.fillStyle = g
+        c.beginPath()
+        c.moveTo(-step, H)
+        for (const [x, y] of pts) c.lineTo(x, y)
+        c.lineTo(W + step, H)
+        c.closePath()
+        c.fill()
+        c.strokeStyle = rim
+        c.lineWidth = 1.6 / k
+        c.beginPath()
+        pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
+        c.stroke()
+      }
+      range(3, horizon + 10, 150, 70, '#8a4f9e', '#c46a8a', '#ffa94d')
+      range(5, LAVA_Y + 4, 95, 55, '#3b0f5c', '#1a0629', '#ff6f5a')
+
+      // floating islands: a polished top with jagged rock hanging underneath
+      for (const p of platforms) {
+        const depth = 26
+        const rock = c.createLinearGradient(0, p.y, 0, p.y + depth)
+        rock.addColorStop(0, '#a05a98')
+        rock.addColorStop(1, '#3b0f5c')
+        c.fillStyle = rock
+        c.beginPath()
+        c.moveTo(p.x - 2, p.y + 6)
+        const n = p.rocks.length
+        for (let i = 0; i < n; i++) {
+          const fx = (i + 0.5) / n
+          const centre = 1 - Math.abs(fx - 0.5) * 2
+          c.lineTo(p.x + fx * p.w, p.y + 8 + (depth - 8) * centre * (0.5 + p.rocks[i] * 0.5))
+        }
+        c.lineTo(p.x + p.w + 2, p.y + 6)
+        c.closePath()
+        c.fill()
+        const top = c.createLinearGradient(0, p.y, 0, p.y + 10)
+        top.addColorStop(0, '#ffffff')
+        top.addColorStop(0.35, '#d7c4ff')
+        top.addColorStop(1, '#7a52b8')
+        c.fillStyle = top
+        c.fillRect(p.x - 3, p.y, p.w + 6, 10)
+      }
+
+      c.setTransform(1, 0, 0, 1, 0, 0)
+      quantize(backdrop, 44, false)
+      // the dark outline along the top edge of each island, after pixelating so it stays one pixel thick
+      c.fillStyle = '#ffffff'
+      for (const p of platforms) c.fillRect(X(p.x - 3) + 1, X(p.y), X(p.w + 6) - 2, 1)
+    }
+
+    // Sprites are drawn as shapes into a small canvas at buffer resolution, then pixelated with an outline.
+    const makeFrame = (draw: (c: Draw) => void): Frame => {
+      const sc = k * SPRITE_SCALE
+      const cv = document.createElement('canvas')
+      cv.width = Math.ceil(100 * sc) + 2
+      cv.height = Math.ceil(80 * sc) + 2
+      const ox = Math.round(52 * sc) + 1
+      const oy = Math.round(46 * sc) + 1
+      const c = cv.getContext('2d')
+      if (c) {
+        c.setTransform(sc, 0, 0, sc, ox, oy)
+        draw(c)
+      }
+      quantize(cv, 0, true)
+      return { img: cv, ox, oy }
+    }
+
+    // Lettering is drawn once at buffer resolution and pixelated, then reused until the text changes.
+    const label = (key: string, size: number, draw: (c: Draw, px: number, base: number) => number, dither = 0): Label => {
+      const cached = labels.get(key)
+      if (cached) return cached
+      if (labels.size > 40) labels.clear()
+      const px = Math.max(9, Math.round(size * k))
+      const cv = document.createElement('canvas')
+      cv.width = LW
+      cv.height = Math.ceil(px * 1.9)
+      const base = Math.round(px * 1.3)
+      const c = cv.getContext('2d')
+      const half = c ? draw(c, px, base) : 0
+      quantize(cv, dither, false)
+      const made = { img: cv, base, half }
+      labels.set(key, made)
+      return made
+    }
+
+    // Chrome lettering in the van-mural style: sky reflected on top, a dark horizon line, warm ground below.
+    const chrome = (s: string, size: number) =>
+      label(
+        `chrome|${s}|${size}`,
+        size,
+        (c, px, base) => {
+          const face = (n: number) => `italic 900 ${n}px Georgia, 'Times New Roman', serif`
+          c.font = face(px)
+          const max = LW - 16
+          const width = c.measureText(s).width
+          if (width > max) {
+            px = Math.max(10, Math.floor((px * max) / width))
+            c.font = face(px)
+          }
+          c.textAlign = 'center'
+          const g = c.createLinearGradient(0, base - px * 0.8, 0, base + px * 0.05)
+          g.addColorStop(0, '#ffffff')
+          g.addColorStop(0.35, '#9fdcff')
+          g.addColorStop(0.5, '#2b0a4a')
+          g.addColorStop(0.53, '#ff8a3d')
+          g.addColorStop(0.8, '#ffe08a')
+          g.addColorStop(1, '#ffffff')
+          c.lineJoin = 'round'
+          c.lineWidth = Math.max(3, px * 0.18)
+          c.strokeStyle = '#1a0629'
+          c.shadowColor = 'rgba(255,80,200,0.85)'
+          c.shadowBlur = px * 0.45
+          c.strokeText(s, LW / 2, base)
+          c.shadowBlur = 0
+          c.fillStyle = g
+          c.fillText(s, LW / 2, base)
+          return Math.min(c.measureText(s).width, max) / 2
+        },
+        30,
+      )
+
+    // Smaller text with a dark outline so it reads over any part of the sky.
+    const caption = (s: string, size: number, align: CanvasTextAlign = 'center') =>
+      label(`caption|${s}|${size}|${align}`, size, (c, px, base) => {
+        c.font = `italic 700 ${px}px Georgia, serif`
+        c.textAlign = align
+        const x = align === 'left' ? 6 : align === 'right' ? LW - 6 : LW / 2
+        c.lineJoin = 'round'
+        c.lineWidth = 3
+        c.strokeStyle = '#1a0629'
+        c.strokeText(s, x, base)
+        c.fillStyle = '#fff6c8'
+        c.fillText(s, x, base)
+        return c.measureText(s).width / 2
+      })
 
     const fit = () => {
       const rect = canvas.getBoundingClientRect()
       const cw = Math.max(1, rect.width)
       const ch = Math.max(1, rect.height)
-      if (cw >= ch) {
+      const wide = cw >= ch
+      pixel = Math.max(2, Math.round(wide ? ch / 240 : cw / 256))
+      LW = Math.ceil(cw / pixel)
+      LH = Math.ceil(ch / pixel)
+      if (wide) {
         H = 500
-        W = Math.round((500 * cw) / ch)
+        W = Math.round((500 * LW) / LH)
+        k = LH / H
       } else {
         W = 400
-        H = Math.round((400 * ch) / cw)
+        H = Math.round((400 * LH) / LW)
+        k = LW / W
       }
       LAVA_Y = H - 40
       const rand = seeded(7)
@@ -71,165 +568,20 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       stars = Array.from({ length: Math.round(W / 9) }, () => ({
         x: rand() * W,
         y: rand() * H * 0.42,
-        r: 0.6 + rand() * 1.4,
         phase: rand() * Math.PI * 2,
         burst: rand() < 0.08,
       }))
-      // draw at the screen's real resolution so the art stays crisp
-      scale = (cw / W) * Math.min(window.devicePixelRatio || 1, 2)
-      canvas.width = Math.round(W * scale)
-      canvas.height = Math.round(H * scale)
-      backdrop.width = canvas.width
-      backdrop.height = canvas.height
+      canvas.width = LW * pixel
+      canvas.height = LH * pixel
+      buffer.width = LW
+      buffer.height = LH
+      backdrop.width = LW
+      backdrop.height = LH
+      labels.clear()
       paintBackdrop()
+      heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop)))
+      foeFrames = POSES.map(([lift]) => makeFrame((c) => drawFoe(c, lift)))
     }
-
-    // ---- the painted backdrop: sky, striped sun, planets, clouds and two ranges of mountains ----
-    const paintBackdrop = () => {
-      const b = backdrop.getContext('2d')
-      if (!b) return
-      b.setTransform(scale, 0, 0, scale, 0, 0)
-      const horizon = LAVA_Y - 40
-
-      // sky: deep indigo at the top, through violet and magenta, to a hot gold glow at the horizon
-      const sky = b.createLinearGradient(0, 0, 0, horizon)
-      sky.addColorStop(0, '#12052e')
-      sky.addColorStop(0.3, '#3b0f5c')
-      sky.addColorStop(0.55, '#8e2a7e')
-      sky.addColorStop(0.78, '#e8506a')
-      sky.addColorStop(0.92, '#ff8a3d')
-      sky.addColorStop(1, '#ffc65c')
-      b.fillStyle = sky
-      b.fillRect(0, 0, W, H)
-
-      // airbrushed haze bands
-      for (let i = 0; i < 5; i++) {
-        const y = horizon * (0.35 + i * 0.12)
-        const g = b.createRadialGradient(W / 2, y, 0, W / 2, y, W * 0.7)
-        g.addColorStop(0, i % 2 ? 'rgba(255,170,220,0.12)' : 'rgba(255,210,150,0.1)')
-        g.addColorStop(1, 'rgba(255,170,220,0)')
-        b.fillStyle = g
-        b.save()
-        b.translate(W / 2, y)
-        b.scale(1, 0.12)
-        b.translate(-W / 2, -y)
-        b.fillRect(0, y - W * 0.7, W, W * 1.4)
-        b.restore()
-      }
-
-      // the big striped sunset sun, with a soft halo behind it
-      const sunR = Math.min(W, H) * 0.24
-      const sunX = W / 2
-      const sunY = horizon - sunR * 0.35
-      const halo = b.createRadialGradient(sunX, sunY, sunR * 0.6, sunX, sunY, sunR * 2.4)
-      halo.addColorStop(0, 'rgba(255,200,120,0.55)')
-      halo.addColorStop(0.5, 'rgba(255,110,120,0.18)')
-      halo.addColorStop(1, 'rgba(255,110,120,0)')
-      b.fillStyle = halo
-      b.fillRect(0, 0, W, H)
-
-      const sun = document.createElement('canvas')
-      const sz = Math.ceil(sunR * 2 * scale)
-      sun.width = sz
-      sun.height = sz
-      const s = sun.getContext('2d')
-      if (s) {
-        s.setTransform(scale, 0, 0, scale, 0, 0)
-        const sg = s.createLinearGradient(0, 0, 0, sunR * 2)
-        sg.addColorStop(0, '#fff6c8')
-        sg.addColorStop(0.45, '#ffc94d')
-        sg.addColorStop(0.75, '#ff7a45')
-        sg.addColorStop(1, '#ff3d7f')
-        s.fillStyle = sg
-        s.beginPath()
-        s.arc(sunR, sunR, sunR, 0, Math.PI * 2)
-        s.fill()
-        // cut the stripes out of the lower half, getting thicker toward the bottom
-        s.globalCompositeOperation = 'destination-out'
-        for (let i = 0; i < 7; i++) {
-          const y = sunR * (1.02 + i * 0.14)
-          s.fillRect(0, y, sunR * 2, 1.2 + i * 1.4)
-        }
-      }
-      b.drawImage(sun, sunX - sunR, sunY - sunR, sunR * 2, sunR * 2)
-
-      // a pale ringed planet and a small moon, shaded like an airbrushed sphere
-      const px = W * 0.8
-      const py = H * 0.17
-      const pr = 30
-      b.save()
-      b.translate(px, py)
-      b.rotate(-0.35)
-      b.strokeStyle = 'rgba(255,215,190,0.35)'
-      b.lineWidth = 5
-      b.beginPath()
-      b.ellipse(0, 0, pr * 2, pr * 0.42, 0, Math.PI, Math.PI * 2)
-      b.stroke()
-      const pg = b.createRadialGradient(-pr * 0.4, -pr * 0.45, pr * 0.1, 0, 0, pr)
-      pg.addColorStop(0, '#f4f0ff')
-      pg.addColorStop(0.5, '#a9b8ff')
-      pg.addColorStop(1, '#4b3a8f')
-      b.fillStyle = pg
-      b.beginPath()
-      b.arc(0, 0, pr, 0, Math.PI * 2)
-      b.fill()
-      b.strokeStyle = 'rgba(255,225,200,0.55)'
-      b.beginPath()
-      b.ellipse(0, 0, pr * 2, pr * 0.42, 0, 0, Math.PI)
-      b.stroke()
-      b.restore()
-      const mg = b.createRadialGradient(W * 0.14 - 4, H * 0.12 - 4, 1, W * 0.14, H * 0.12, 11)
-      mg.addColorStop(0, '#ffe9f4')
-      mg.addColorStop(1, '#9c5fa8')
-      b.fillStyle = mg
-      b.beginPath()
-      b.arc(W * 0.14, H * 0.12, 11, 0, Math.PI * 2)
-      b.fill()
-
-      // long wispy clouds lit pink and gold from below
-      const rand = seeded(11)
-      for (let i = 0; i < 6; i++) {
-        const cx = rand() * W
-        const cy = horizon * (0.45 + rand() * 0.4)
-        const cw = W * (0.18 + rand() * 0.25)
-        const cg = b.createLinearGradient(0, cy - 6, 0, cy + 6)
-        cg.addColorStop(0, 'rgba(255,190,230,0)')
-        cg.addColorStop(0.6, 'rgba(255,170,200,0.28)')
-        cg.addColorStop(1, 'rgba(255,220,140,0.4)')
-        b.fillStyle = cg
-        b.beginPath()
-        b.ellipse(cx, cy, cw / 2, 5 + rand() * 4, 0, 0, Math.PI * 2)
-        b.fill()
-      }
-
-      // two ranges of jagged mountains: misty far peaks, then darker near ones with a hot rim of light
-      const range = (seed: number, base: number, height: number, step: number, fill: CanvasGradient, rim: string) => {
-        const r = seeded(seed)
-        const pts: [number, number][] = []
-        for (let x = -step; x <= W + step; x += step) pts.push([x + (r() - 0.5) * step * 0.6, base - height * (0.35 + r() * 0.65)])
-        b.fillStyle = fill
-        b.beginPath()
-        b.moveTo(-step, H)
-        for (const [x, y] of pts) b.lineTo(x, y)
-        b.lineTo(W + step, H)
-        b.closePath()
-        b.fill()
-        b.strokeStyle = rim
-        b.lineWidth = 1.5
-        b.beginPath()
-        pts.forEach(([x, y], i) => (i ? b.lineTo(x, y) : b.moveTo(x, y)))
-        b.stroke()
-      }
-      const far = b.createLinearGradient(0, horizon - 150, 0, horizon)
-      far.addColorStop(0, '#8a4f9e')
-      far.addColorStop(1, '#c46a8a')
-      range(3, horizon + 10, 150, 70, far, 'rgba(255,200,170,0.35)')
-      const near = b.createLinearGradient(0, horizon - 90, 0, LAVA_Y)
-      near.addColorStop(0, '#3a1352')
-      near.addColorStop(1, '#170726')
-      range(5, LAVA_Y + 4, 95, 55, near, 'rgba(255,140,90,0.6)')
-    }
-
     fit()
 
     let audio: AudioContext | null = null
@@ -302,7 +654,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       r.vy = FLAP
       r.wing = 8
       if (r === player) {
-        burst(r.x - r.dir * 10, r.y + 4, 3, ['#fff6d8', '#ffd6f2'], 1, 1.6)
+        burst(r.x - r.dir * 10, r.y + 4, 3, ['#fff6c8', '#ff9de2'], 1, 1.6)
         if (mode === 'play') beep(220, 0.05)
       }
     }
@@ -346,7 +698,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const loseLife = () => {
       beep(80, 0.4, 'sawtooth')
-      burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffb347', '#ff5a1f', '#ffe08a'], 3.5, 3)
+      burst(player.x, Math.min(player.y, LAVA_Y), 26, ['#ffa94d', '#ff5a1f', '#ffe08a'], 3.5, 3)
       if (mode !== 'play') {
         reset()
         return
@@ -363,12 +715,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
           // dead even: both bounce off
           player.vx = -player.vx * 1.5 || -3
           e.vx = -e.vx * 1.5 || 3
-          burst((e.x + player.x) / 2, (e.y + player.y) / 2, 8, ['#ffffff', '#9fe8ff'], 2, 1.8)
+          burst((e.x + player.x) / 2, (e.y + player.y) / 2, 8, ['#ffffff', '#9fdcff'], 2, 1.8)
           beep(110)
         } else if (player.y < e.y) {
           e.alive = false
           score += 500
-          burst(e.x, e.y, 30, ['#ffe066', '#ff9de2', '#b388ff', '#ffffff'], 3.2, 2.6)
+          burst(e.x, e.y, 30, ['#ffe08a', '#ff9de2', '#b388ff', '#ffffff'], 3.2, 2.6)
           beep(660, 0.15, 'triangle')
         } else if (player.safe === 0) {
           loseLife()
@@ -377,41 +729,27 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    // ---- per-frame drawing ----
+    // ---- per-frame drawing, all in buffer pixels ----
 
-    // a four-pointed airbrush sparkle, the classic glint on van-mural chrome
-    const sparkle = (x: number, y: number, size: number, alpha = 1) => {
-      ctx.save()
-      ctx.globalAlpha = alpha
-      ctx.translate(x, y)
-      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, size)
-      g.addColorStop(0, 'rgba(255,255,255,1)')
-      g.addColorStop(0.3, 'rgba(255,240,220,0.6)')
-      g.addColorStop(1, 'rgba(255,200,240,0)')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      for (let i = 0; i < 4; i++) {
-        const a = (i * Math.PI) / 2
-        ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size)
-        ctx.lineTo(Math.cos(a + Math.PI / 4) * size * 0.14, Math.sin(a + Math.PI / 4) * size * 0.14)
-      }
-      ctx.closePath()
-      ctx.fill()
-      ctx.beginPath()
-      ctx.arc(0, 0, size * 0.35, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
+    // a four-pointed pixel glint
+    const glint = (x: number, y: number, arm: number) => {
+      b.fillStyle = '#ff9de2'
+      b.fillRect(x - arm, y, arm * 2 + 1, 1)
+      b.fillRect(x, y - arm, 1, arm * 2 + 1)
+      b.fillStyle = '#ffffff'
+      b.fillRect(x - 1, y, 3, 1)
+      b.fillRect(x, y - 1, 1, 3)
     }
 
     const drawStars = () => {
       for (const s of stars) {
-        const tw = 0.55 + 0.45 * Math.sin(t * 0.05 + s.phase)
-        if (s.burst) sparkle(s.x, s.y, 5 + tw * 4, tw)
+        const tw = 0.5 + 0.5 * Math.sin(t * 0.05 + s.phase)
+        const x = X(s.x)
+        const y = X(s.y)
+        if (s.burst) glint(x, y, tw > 0.6 ? 2 : 1)
         else {
-          ctx.fillStyle = `rgba(255,245,255,${0.35 + tw * 0.55})`
-          ctx.beginPath()
-          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
-          ctx.fill()
+          b.fillStyle = tw > 0.75 ? '#ffffff' : tw > 0.4 ? '#d7c4ff' : '#8a4f9e'
+          b.fillRect(x, y, 1, 1)
         }
       }
       // an occasional shooting star
@@ -420,349 +758,102 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         comet.life--
         comet.x += 9
         comet.y += 3
-        const g = ctx.createLinearGradient(comet.x - 60, comet.y - 20, comet.x, comet.y)
-        g.addColorStop(0, 'rgba(255,255,255,0)')
-        g.addColorStop(1, `rgba(255,250,230,${comet.life / 40})`)
-        ctx.strokeStyle = g
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.moveTo(comet.x - 60, comet.y - 20)
-        ctx.lineTo(comet.x, comet.y)
-        ctx.stroke()
+        const trail = ['#ffffff', '#fff6c8', '#ffe08a', '#ff9de2', '#a98cf0', '#6a2a86']
+        trail.forEach((col, i) => {
+          b.fillStyle = col
+          b.fillRect(X(comet.x) - i * 3, X(comet.y) - i, 3, 1)
+        })
       }
     }
 
+    // the molten lake, drawn column by column in hard bands of colour
+    const LAVA_BANDS: [string, number][] = [
+      ['#fff6c8', 1],
+      ['#ffe08a', 1],
+      ['#ffa94d', 2],
+      ['#ff8a3d', 2],
+      ['#ff5a1f', 3],
+      ['#e8250f', 4],
+      ['#c0102a', 5],
+      ['#6d0a2e', 6],
+      ['#4a0218', 99],
+    ]
+    const surfaceY: number[] = []
     const drawLava = () => {
-      // heat glow rising off the surface
-      const glow = ctx.createLinearGradient(0, LAVA_Y - 60, 0, LAVA_Y)
-      glow.addColorStop(0, 'rgba(255,90,20,0)')
-      glow.addColorStop(1, 'rgba(255,90,20,0.35)')
-      ctx.fillStyle = glow
-      ctx.fillRect(0, LAVA_Y - 60, W, 60)
-
-      const surface = (x: number) => LAVA_Y + Math.sin(x * 0.04 + t * 0.06) * 3 + Math.sin(x * 0.013 - t * 0.03) * 2
-      const g = ctx.createLinearGradient(0, LAVA_Y - 4, 0, H)
-      g.addColorStop(0, '#ffe08a')
-      g.addColorStop(0.15, '#ff8a1f')
-      g.addColorStop(0.5, '#e8250f')
-      g.addColorStop(1, '#4a0218')
-      ctx.fillStyle = g
-      ctx.beginPath()
-      ctx.moveTo(0, H)
-      for (let x = 0; x <= W + 10; x += 10) ctx.lineTo(x, surface(x))
-      ctx.lineTo(W, H)
-      ctx.closePath()
-      ctx.fill()
-
-      // bright crust line and slow rising bubbles
-      ctx.strokeStyle = 'rgba(255,245,190,0.8)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      for (let x = 0; x <= W + 10; x += 10) (x ? ctx.lineTo(x, surface(x)) : ctx.moveTo(x, surface(x)))
-      ctx.stroke()
+      for (let x = 0; x < LW; x++) {
+        const wx = x / k
+        surfaceY[x] = Math.round((LAVA_Y + Math.sin(wx * 0.04 + t * 0.06) * 3 + Math.sin(wx * 0.013 - t * 0.03) * 2) * k)
+      }
+      // embers flickering just above the surface
+      b.fillStyle = '#ff5a1f'
+      for (let x = 0; x < LW; x++) if ((x * 7 + (t >> 2)) % 11 === 0) b.fillRect(x, surfaceY[x] - 2, 1, 1)
+      let depth = 0
+      for (const [col, len] of LAVA_BANDS) {
+        b.fillStyle = col
+        for (let x = 0; x < LW; x++) b.fillRect(x, surfaceY[x] + depth, 1, len)
+        // a checkerboard row where each band meets the next, the 16-bit way to blend
+        if (len < 99) for (let x = (depth + (t >> 4)) & 1; x < LW; x += 2) b.fillRect(x, surfaceY[x] + depth + len, 1, 1)
+        depth += len
+      }
+      // rising bubbles
       for (let i = 0; i < 6; i++) {
         const cycle = (t * 0.6 + i * 53) % 120
-        const bx = ((i * 137 + Math.floor((t * 0.6 + i * 53) / 120) * 71) % W) + 0.5
-        const r = cycle < 90 ? cycle / 30 : 3 + (cycle - 90) / 6
-        ctx.fillStyle = cycle < 90 ? 'rgba(255,220,120,0.7)' : 'rgba(255,240,200,0.4)'
-        ctx.beginPath()
-        ctx.arc(bx, surface(bx) + 6 - Math.min(cycle, 90) / 30, r, 0, Math.PI * 2)
-        ctx.fill()
+        const bx = ((i * 137 + Math.floor((t * 0.6 + i * 53) / 120) * 71) % LW) | 0
+        const size = cycle < 90 ? 1 + Math.floor(cycle / 45) : 3
+        b.fillStyle = cycle < 90 ? '#ffe08a' : '#fff6c8'
+        b.fillRect(bx, surfaceY[bx] + 3 - Math.floor(Math.min(cycle, 90) / 30), size, size)
       }
     }
 
-    // floating islands: a polished lavender top with jagged rock hanging underneath and a glowing crystal
-    const drawPlatforms = () => {
+    // crystals glowing under each island
+    const drawCrystals = () => {
       for (const p of platforms) {
-        const depth = 26
-        const rock = ctx.createLinearGradient(0, p.y, 0, p.y + depth)
-        rock.addColorStop(0, '#5a2a7a')
-        rock.addColorStop(1, '#1c0930')
-        ctx.fillStyle = rock
-        ctx.beginPath()
-        ctx.moveTo(p.x - 2, p.y + 6)
-        const n = p.rocks.length
-        for (let i = 0; i < n; i++) {
-          const fx = (i + 0.5) / n
-          const centre = 1 - Math.abs(fx - 0.5) * 2
-          ctx.lineTo(p.x + fx * p.w, p.y + 8 + (depth - 8) * centre * (0.5 + p.rocks[i] * 0.5))
+        const cx = X(p.x + p.w * (0.3 + p.rocks[0] * 0.4))
+        const cy = X(p.y + 15)
+        const bright = Math.sin(t * 0.07 + p.x) > 0
+        if (bright) {
+          b.fillStyle = '#1fb8e0'
+          b.fillRect(cx - 2, cy, 5, 1)
+          b.fillRect(cx, cy - 3, 1, 7)
         }
-        ctx.lineTo(p.x + p.w + 2, p.y + 6)
-        ctx.closePath()
-        ctx.fill()
-
-        const top = ctx.createLinearGradient(0, p.y, 0, p.y + 9)
-        top.addColorStop(0, '#ffffff')
-        top.addColorStop(0.35, '#d7c4ff')
-        top.addColorStop(1, '#7a52b8')
-        ctx.fillStyle = top
-        ctx.beginPath()
-        ctx.roundRect(p.x - 3, p.y, p.w + 6, 9, 4)
-        ctx.fill()
-        ctx.strokeStyle = 'rgba(255,170,120,0.6)'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.moveTo(p.x, p.y + 8.5)
-        ctx.lineTo(p.x + p.w, p.y + 8.5)
-        ctx.stroke()
-
-        // a crystal glowing under each island
-        const cx = p.x + p.w * (0.3 + p.rocks[0] * 0.4)
-        const cy = p.y + 14
-        const pulse = 0.6 + 0.4 * Math.sin(t * 0.07 + p.x)
-        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 12)
-        cg.addColorStop(0, `rgba(140,255,240,${0.7 * pulse})`)
-        cg.addColorStop(1, 'rgba(140,255,240,0)')
-        ctx.fillStyle = cg
-        ctx.fillRect(cx - 12, cy - 12, 24, 24)
-        ctx.fillStyle = '#c9fff6'
-        ctx.beginPath()
-        ctx.moveTo(cx, cy - 5)
-        ctx.lineTo(cx + 3, cy)
-        ctx.lineTo(cx, cy + 6)
-        ctx.lineTo(cx - 3, cy)
-        ctx.fill()
+        b.fillStyle = bright ? '#c9fff6' : '#29f0ff'
+        b.fillRect(cx, cy - 2, 1, 5)
+        b.fillRect(cx - 1, cy - 1, 3, 3)
       }
-    }
-
-    // A feathered wing that lifts high on a flap and glides gently otherwise.
-    const wing = (r: Rider, light: string, dark: string, tip: string) => {
-      const lift = r.wing > 0 ? -16 + (8 - r.wing) * 0.5 : 2 + Math.sin(t * 0.12 + r.x * 0.02) * 3
-      for (let k = 0; k < 4; k++) {
-        const g = ctx.createLinearGradient(0, -4, -30, lift - 10)
-        g.addColorStop(0, light)
-        g.addColorStop(0.7, dark)
-        g.addColorStop(1, tip)
-        ctx.fillStyle = g
-        ctx.beginPath()
-        ctx.moveTo(4 - k * 3, -2)
-        ctx.quadraticCurveTo(-6 - k * 4, lift - 18 + k * 4, -24 + k * 3, lift - 10 + k * 6)
-        ctx.quadraticCurveTo(-10 - k * 2, lift - 2 + k * 3, 2 - k * 3, 2)
-        ctx.closePath()
-        ctx.fill()
-      }
-    }
-
-    // Hero: a pale winged horse with a golden mane and a rider in a flowing cyan cape.
-    const drawHero = (r: Rider) => {
-      const gallop = Math.sin(t * 0.3) * 2
-      // tail
-      const tail = ctx.createLinearGradient(-16, 0, -34, 10)
-      tail.addColorStop(0, '#ffd56b')
-      tail.addColorStop(1, 'rgba(255,140,200,0)')
-      ctx.strokeStyle = tail
-      ctx.lineWidth = 4
-      ctx.lineCap = 'round'
-      ctx.beginPath()
-      ctx.moveTo(-15, 2)
-      ctx.quadraticCurveTo(-26, -2 + gallop, -34, 10)
-      ctx.stroke()
-      // legs
-      ctx.strokeStyle = '#e8dcc8'
-      ctx.lineWidth = 2.5
-      ctx.beginPath()
-      ctx.moveTo(-8, 8)
-      ctx.lineTo(-12, 15 + gallop)
-      ctx.moveTo(8, 8)
-      ctx.lineTo(12, 14 - gallop)
-      ctx.stroke()
-      // body
-      const body = ctx.createLinearGradient(0, -6, 0, 12)
-      body.addColorStop(0, '#ffffff')
-      body.addColorStop(1, '#cdbfe0')
-      ctx.fillStyle = body
-      ctx.beginPath()
-      ctx.ellipse(0, 3, 17, 8, 0, 0, Math.PI * 2)
-      ctx.fill()
-      // neck and head
-      ctx.beginPath()
-      ctx.moveTo(10, -1)
-      ctx.quadraticCurveTo(17, -10, 21, -14)
-      ctx.lineTo(27, -11)
-      ctx.quadraticCurveTo(28, -8, 25, -7)
-      ctx.lineTo(20, -6)
-      ctx.quadraticCurveTo(18, 2, 13, 6)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = '#2b0a4a'
-      ctx.fillRect(22, -12, 1.6, 1.6)
-      // mane
-      ctx.strokeStyle = '#ffcf4d'
-      ctx.lineWidth = 3
-      ctx.beginPath()
-      ctx.moveTo(20, -14)
-      ctx.quadraticCurveTo(13, -12 + gallop * 0.5, 9, -3)
-      ctx.stroke()
-      // cape
-      const cape = ctx.createLinearGradient(0, -14, -22, 0)
-      cape.addColorStop(0, '#29f0ff')
-      cape.addColorStop(1, 'rgba(60,90,255,0.2)')
-      ctx.fillStyle = cape
-      ctx.beginPath()
-      ctx.moveTo(-1, -16)
-      ctx.quadraticCurveTo(-14, -14 + gallop, -24, -6 + gallop)
-      ctx.quadraticCurveTo(-12, -6, 1, -6)
-      ctx.closePath()
-      ctx.fill()
-      // rider and helmet
-      ctx.fillStyle = '#1fb8e0'
-      ctx.fillRect(-3, -15, 7, 11)
-      const helm = ctx.createRadialGradient(0, -20, 0, 1, -18, 5)
-      helm.addColorStop(0, '#ffffff')
-      helm.addColorStop(1, '#8a9bc8')
-      ctx.fillStyle = helm
-      ctx.beginPath()
-      ctx.arc(1, -18, 4.5, 0, Math.PI * 2)
-      ctx.fill()
-      // sword with a glint
-      ctx.strokeStyle = '#ffffff'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(3, -9)
-      ctx.lineTo(24, -16)
-      ctx.stroke()
-      if (Math.floor(t / 20) % 3 === 0) sparkle(24, -16, 5)
-      wing(r, '#ffffff', '#ffe6b0', '#ff9ed8')
-    }
-
-    // Foe: a bronze griffin with an eagle head, ridden by a hooded sorcerer with a glowing staff.
-    const drawFoe = (r: Rider) => {
-      // lion body and tail
-      ctx.strokeStyle = '#7a4a22'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(-15, 2)
-      ctx.quadraticCurveTo(-25, 6, -28, -2)
-      ctx.stroke()
-      const body = ctx.createLinearGradient(0, -6, 0, 12)
-      body.addColorStop(0, '#d0964a')
-      body.addColorStop(1, '#6b3d1c')
-      ctx.fillStyle = body
-      ctx.beginPath()
-      ctx.ellipse(0, 3, 16, 8, 0, 0, Math.PI * 2)
-      ctx.fill()
-      // eagle head and hooked beak
-      ctx.fillStyle = '#f2e6d0'
-      ctx.beginPath()
-      ctx.arc(16, -6, 6, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#ffb31a'
-      ctx.beginPath()
-      ctx.moveTo(21, -8)
-      ctx.quadraticCurveTo(28, -7, 25, -2)
-      ctx.lineTo(21, -4)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = '#c0102a'
-      ctx.fillRect(17, -8, 1.6, 1.6)
-      // sorcerer: crimson robe and pointed hood
-      const robe = ctx.createLinearGradient(0, -24, 0, -2)
-      robe.addColorStop(0, '#ff3b6b')
-      robe.addColorStop(1, '#6d0a2e')
-      ctx.fillStyle = robe
-      ctx.beginPath()
-      ctx.moveTo(1, -26)
-      ctx.lineTo(7, -3)
-      ctx.lineTo(-6, -3)
-      ctx.closePath()
-      ctx.fill()
-      ctx.fillStyle = '#1a0012'
-      ctx.beginPath()
-      ctx.arc(1.5, -16, 2.6, 0, Math.PI * 2)
-      ctx.fill()
-      // staff with a pulsing orb
-      ctx.strokeStyle = '#3d1f0f'
-      ctx.lineWidth = 1.8
-      ctx.beginPath()
-      ctx.moveTo(6, -4)
-      ctx.lineTo(12, -24)
-      ctx.stroke()
-      const pulse = 0.6 + 0.4 * Math.sin(t * 0.15 + r.x)
-      const orb = ctx.createRadialGradient(12, -26, 0, 12, -26, 8)
-      orb.addColorStop(0, '#ffffff')
-      orb.addColorStop(0.3, `rgba(200,120,255,${pulse})`)
-      orb.addColorStop(1, 'rgba(160,60,255,0)')
-      ctx.fillStyle = orb
-      ctx.beginPath()
-      ctx.arc(12, -26, 8, 0, Math.PI * 2)
-      ctx.fill()
-      wing(r, '#e8b46a', '#9a5a2a', '#4a1f10')
     }
 
     const drawRider = (r: Rider, hero: boolean) => {
       if (!r.alive) return
       if (hero && r.safe > 0 && Math.floor(t / 4) % 2) return // blink while protected after a respawn
-      ctx.save()
-      ctx.translate(r.x, r.y)
-      ctx.scale(r.dir * 1.3, 1.3)
-      if (hero) drawHero(r)
-      else drawFoe(r)
-      ctx.restore()
+      const frames = hero ? heroFrames : foeFrames
+      const f = r.wing > 0 ? frames[0] : frames[1 + Math.floor(((Math.sin(t * 0.12 + r.x * 0.02) + 1) / 2) * 2.999)]
+      b.save()
+      b.translate(X(r.x), X(r.y))
+      b.scale(r.dir, 1)
+      b.drawImage(f.img, -f.ox, -f.oy)
+      b.restore()
+      // a glint running along the hero's sword, and a pulse on each sorcerer's orb
+      if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 24 * SPRITE_SCALE), X(r.y - 16 * SPRITE_SCALE), 2)
+      if (!hero && Math.sin(t * 0.15 + r.x) > 0.3) glint(X(r.x + r.dir * 12 * SPRITE_SCALE), X(r.y - 26 * SPRITE_SCALE), 1)
     }
 
     const drawSparks = () => {
-      ctx.save()
-      ctx.globalCompositeOperation = 'lighter'
       for (const s of sparks) {
         s.x += s.vx
         s.y += s.vy
         s.vy += 0.08
         s.vx *= 0.97
         s.life--
-        ctx.globalAlpha = Math.max(0, s.life / s.max)
-        ctx.fillStyle = s.color
-        ctx.beginPath()
-        ctx.arc(s.x, s.y, s.size * (0.4 + (0.6 * s.life) / s.max), 0, Math.PI * 2)
-        ctx.fill()
+        // sparks shrink, then blink out
+        if (s.life < 10 && s.life % 2) continue
+        b.fillStyle = s.color
+        const n = s.size > 2.2 && s.life > s.max / 2 ? 2 : 1
+        b.fillRect(X(s.x), X(s.y), n, n)
       }
-      ctx.restore()
       sparks = sparks.filter((s) => s.life > 0)
     }
 
-    // Chrome lettering in the van-mural style: sky reflected on top, a dark horizon line, warm ground below.
-    const chrome = (s: string, y: number, size: number) => {
-      let px = size
-      const face = (n: number) => `italic 900 ${n}px Georgia, 'Times New Roman', serif`
-      ctx.font = face(px)
-      const max = W - 48
-      const width = ctx.measureText(s).width
-      if (width > max) {
-        px = Math.max(12, Math.floor((size * max) / width))
-        ctx.font = face(px)
-      }
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'alphabetic'
-      const g = ctx.createLinearGradient(0, y - px * 0.8, 0, y + px * 0.05)
-      g.addColorStop(0, '#ffffff')
-      g.addColorStop(0.35, '#9fdcff')
-      g.addColorStop(0.5, '#2a1660')
-      g.addColorStop(0.53, '#ff9a3c')
-      g.addColorStop(0.8, '#ffe9a8')
-      g.addColorStop(1, '#ffffff')
-      ctx.lineJoin = 'round'
-      ctx.lineWidth = px * 0.16
-      ctx.strokeStyle = '#1a0629'
-      ctx.shadowColor = 'rgba(255,80,200,0.7)'
-      ctx.shadowBlur = px * 0.6
-      ctx.strokeText(s, W / 2, y)
-      ctx.shadowBlur = 0
-      ctx.fillStyle = g
-      ctx.fillText(s, W / 2, y)
-      const half = Math.min(ctx.measureText(s).width, max) / 2
-      const glint = 0.5 + 0.5 * Math.sin(t * 0.06)
-      sparkle(W / 2 + half - px * 0.3, y - px * 0.7, px * 0.5 * (0.6 + glint * 0.6), 0.6 + glint * 0.4)
-      sparkle(W / 2 - half + px * 0.5, y - px * 0.1, px * 0.3 * (1.2 - glint * 0.6), 0.9 - glint * 0.4)
-    }
-
-    const caption = (s: string, y: number, size: number) => {
-      ctx.font = `italic 600 ${size}px Georgia, serif`
-      ctx.textAlign = 'center'
-      ctx.shadowColor = 'rgba(40,0,60,0.9)'
-      ctx.shadowBlur = 8
-      ctx.fillStyle = '#fff1c9'
-      ctx.fillText(s, W / 2, y)
-      ctx.shadowBlur = 0
-    }
+    const place = (l: Label, worldY: number) => b.drawImage(l.img, 0, X(worldY) - l.base)
 
     const loop = () => {
       t++
@@ -789,11 +880,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         }
       }
 
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.drawImage(backdrop, 0, 0)
-      ctx.setTransform(scale, 0, 0, scale, 0, 0)
+      b.drawImage(backdrop, 0, 0)
       drawStars()
-      drawPlatforms()
+      drawCrystals()
       drawLava()
       enemies.forEach((e) => drawRider(e, false))
       drawRider(player, true)
@@ -801,23 +890,24 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
       const top = H * 0.2
       if (mode === 'play') {
-        ctx.font = 'italic 700 17px Georgia, serif'
-        ctx.textAlign = 'left'
-        ctx.shadowColor = 'rgba(40,0,60,0.9)'
-        ctx.shadowBlur = 6
-        ctx.fillStyle = '#fff1c9'
-        ctx.fillText(`Score ${score}`, 18, 30)
-        ctx.textAlign = 'right'
-        ctx.fillText(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, W - 18, 30)
-        ctx.shadowBlur = 0
+        place(caption(`Score ${score}`, 17, 'left'), 32)
+        place(caption(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, 17, 'right'), 32)
       } else if (mode === 'attract') {
-        chrome('SkyRiders', top, 64)
-        caption('of the Velvet Sunset', top + 34, 22)
-        if (Math.floor(t / 40) % 2) caption('Press SPACE or tap to ride', top + 72, 17)
+        const title = chrome('SkyRiders', 64)
+        place(title, top)
+        const swing = Math.floor(t / 30) % 2
+        glint(Math.round(LW / 2 + title.half - 6), X(top - 46), swing ? 3 : 2)
+        glint(Math.round(LW / 2 - title.half + 10), X(top - 6), swing ? 1 : 2)
+        place(caption('of the Velvet Sunset', 22), top + 36)
+        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 76)
       } else {
-        chrome('Game Over', H * 0.38, 56)
-        caption(`Score ${score}  ·  tap or press SPACE`, H * 0.38 + 44, 19)
+        place(chrome('Game Over', 56), H * 0.38)
+        place(caption(`Score ${score}  ·  tap or press SPACE`, 19), H * 0.38 + 46)
       }
+
+      // scale the little buffer up to the screen with hard, square pixels
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(buffer, 0, 0, LW * pixel, LH * pixel)
       raf = requestAnimationFrame(loop)
     }
 
