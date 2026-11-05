@@ -1534,6 +1534,153 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         return c.measureText(s).width / 2
       })
 
+    // The title lettering, in the manner of 70s and 80s fantasy van murals and paperback covers: a soft magenta
+    // aura, letters pushed out into deep 3D, a dark outline with a thin gold rim, a sunset-chrome face (sky
+    // reflected on top, a hard horizon line, warm gold below) and a tapered swash beneath.
+    const logo = (s: string, size: number): Label => {
+      const key = `logo|${s}|${size}`
+      const cached = labels.get(key)
+      if (cached) return cached
+      const face = (n: number) => `italic 900 ${n}px 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif`
+      const cv = document.createElement('canvas')
+      const c = cv.getContext('2d')
+      let px = Math.max(14, Math.round(size * k))
+      const max = LW - 24
+      if (c) {
+        c.font = face(px)
+        const wide = c.measureText(s).width
+        if (wide > max) px = Math.max(12, Math.floor((px * max) / wide))
+      }
+      const depth = Math.max(2, Math.round(px * 0.13))
+      const base = Math.round(px * 1.15)
+      cv.width = LW
+      cv.height = Math.ceil(px * 1.75) + depth
+      let half = 0
+      if (c) {
+        const cx = LW / 2
+        c.font = face(px)
+        c.textAlign = 'center'
+        c.lineJoin = 'round'
+        const width = Math.min(c.measureText(s).width, max)
+        half = width / 2
+        // the aura glowing behind the word
+        c.save()
+        c.translate(cx, base - px * 0.35)
+        c.scale(1, 0.45)
+        const aura = c.createRadialGradient(0, 0, 0, 0, 0, width * 0.62)
+        aura.addColorStop(0, 'rgba(255,61,127,0.6)')
+        aura.addColorStop(0.55, 'rgba(176,58,134,0.32)')
+        aura.addColorStop(1, 'rgba(176,58,134,0)')
+        c.fillStyle = aura
+        c.fillRect(-width, -width, width * 2, width * 2)
+        c.restore()
+        // the swash: a long tapered stroke under the word, warm at its tail and bright at its tip
+        const sy = base + px * 0.24
+        const sw = c.createLinearGradient(cx - width * 0.55, 0, cx + width * 0.52, 0)
+        sw.addColorStop(0, '#b03a86')
+        sw.addColorStop(0.5, '#ff8a3d')
+        sw.addColorStop(1, '#fff6c8')
+        c.fillStyle = '#1a0629'
+        c.beginPath()
+        c.moveTo(cx - width * 0.56, sy + 2)
+        c.quadraticCurveTo(cx, sy - px * 0.16 - 1, cx + width * 0.53, sy - 2)
+        c.quadraticCurveTo(cx, sy + px * 0.14 + 1, cx - width * 0.56, sy + 2)
+        c.fill()
+        c.fillStyle = sw
+        c.beginPath()
+        c.moveTo(cx - width * 0.54, sy + 1.5)
+        c.quadraticCurveTo(cx, sy - px * 0.12, cx + width * 0.52, sy - 1.5)
+        c.quadraticCurveTo(cx, sy + px * 0.1, cx - width * 0.54, sy + 1.5)
+        c.fill()
+        // the 3D extrusion, falling away down and to the right into deep shadow
+        for (let i = depth; i >= 1; i--) {
+          c.fillStyle = i === depth ? '#0d0221' : i > depth / 2 ? '#2b0a4a' : '#5a2a7a'
+          c.fillText(s, cx + i * 0.6, base + i)
+        }
+        // dark outline, then a thin gold rim inside it
+        c.strokeStyle = '#1a0629'
+        c.lineWidth = Math.max(3, px * 0.17)
+        c.strokeText(s, cx, base)
+        c.strokeStyle = '#ffc65c'
+        c.lineWidth = Math.max(1.5, px * 0.07)
+        c.strokeText(s, cx, base)
+        // the sunset-chrome face
+        const g = c.createLinearGradient(0, base - px * 0.78, 0, base + px * 0.06)
+        g.addColorStop(0, '#ffffff')
+        g.addColorStop(0.28, '#9fdcff')
+        g.addColorStop(0.47, '#2a6ad8')
+        g.addColorStop(0.5, '#1a0629')
+        g.addColorStop(0.54, '#ff5a1f')
+        g.addColorStop(0.75, '#ffc65c')
+        g.addColorStop(1, '#fff6c8')
+        c.fillStyle = g
+        c.fillText(s, cx, base)
+      }
+      quantize(cv, 10, false)
+      const made = { img: cv, base, half }
+      labels.set(key, made)
+      return made
+    }
+
+    // The subtitle: spaced gold capitals between thin rules ending in little diamonds.
+    const ornate = (s: string, size: number): Label => {
+      const key = `ornate|${s}|${size}`
+      const cached = labels.get(key)
+      if (cached) return cached
+      const px = Math.max(8, Math.round(size * k))
+      const cv = document.createElement('canvas')
+      cv.width = LW
+      cv.height = Math.ceil(px * 2)
+      const base = Math.round(px * 1.4)
+      const c = cv.getContext('2d')
+      let half = 0
+      if (c) {
+        const text = s.toUpperCase()
+        c.font = `bold ${px}px Verdana, 'Trebuchet MS', Arial, sans-serif`
+        const gap = Math.max(1, Math.round(px * 0.15))
+        const widths = [...text].map((ch) => c.measureText(ch).width)
+        const total = widths.reduce((a, w) => a + w + gap, -gap)
+        half = total / 2
+        const gold = c.createLinearGradient(0, base - px, 0, base)
+        gold.addColorStop(0, '#fff6c8')
+        gold.addColorStop(0.5, '#ffc65c')
+        gold.addColorStop(1, '#ff8a3d')
+        let x = LW / 2 - half
+        c.textAlign = 'left'
+        c.lineJoin = 'round'
+        ;[...text].forEach((ch, i) => {
+          c.strokeStyle = '#1a0629'
+          c.lineWidth = 2
+          c.strokeText(ch, x, base)
+          c.fillStyle = gold
+          c.fillText(ch, x, base)
+          x += widths[i] + gap
+        })
+        // the rules and diamonds either side
+        const mid = base - Math.round(px * 0.38)
+        const reach = Math.round(px * 2.4)
+        for (const side of [-1, 1]) {
+          const x0 = LW / 2 + side * (half + gap * 2)
+          const x1 = x0 + side * reach
+          c.fillStyle = '#1a0629'
+          c.fillRect(Math.min(x0, x1), mid - 1, reach, 3)
+          c.fillStyle = '#ffc65c'
+          c.fillRect(Math.min(x0, x1), mid, reach, 1)
+          c.beginPath()
+          c.moveTo(x1, mid - 2.5)
+          c.lineTo(x1 + side * 2.5, mid + 0.5)
+          c.lineTo(x1, mid + 3.5)
+          c.lineTo(x1 - side * 2.5, mid + 0.5)
+          c.closePath()
+          c.fill()
+        }
+      }
+      quantize(cv, 0, false)
+      const made = { img: cv, base, half }
+      labels.set(key, made)
+      return made
+    }
+
     const fit = () => {
       const rect = canvas.getBoundingClientRect()
       const cw = Math.max(1, rect.width)
@@ -2088,7 +2235,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     // The logo floats gently, and a bright band sweeps across its chrome every few seconds.
     const drawLogo = (worldY: number) => {
-      const title = chrome('SkyRiders', 64)
+      const title = logo('SkyRiders', 92)
       const bob = Math.round(Math.sin(t * 0.04) * 2)
       const y = X(worldY) - title.base + bob
       let img: HTMLCanvasElement = title.img
@@ -2118,9 +2265,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         img = shine
       }
       b.drawImage(img, 0, y)
+      // glints twinkle on the last letter's shoulder and at the bright tip of the swash
+      const px = title.base / 1.15
       const swing = Math.floor(t / 30) % 2
-      glint(Math.round(LW / 2 + title.half - 6), y + title.base - X(46), swing ? 3 : 2)
-      glint(Math.round(LW / 2 - title.half + 10), y + title.base - X(6), swing ? 1 : 2)
+      glint(Math.round(LW / 2 + title.half - px * 0.2), Math.round(y + title.base - px * 0.72), swing ? 3 : 2)
+      glint(Math.round(LW / 2 + title.half * 1.04), Math.round(y + title.base + px * 0.2), swing ? 1 : 2)
+      glint(Math.round(LW / 2 - title.half + px * 0.3), Math.round(y + title.base - px * 0.1), (t >> 4) % 3 === 0 ? 2 : 1)
     }
 
     // ---- the modern pass: lighting over the pixel art, at the same console resolution ----
@@ -2257,14 +2407,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       drawSparks()
       drawPopups()
 
-      const top = H * 0.2
+      const top = H * 0.25
       if (mode === 'play') {
         place(caption(`Score ${score}`, 17, 'left'), 32)
         place(caption(`Wave ${wave}   ${'♥'.repeat(Math.max(0, lives))}`, 17, 'right'), 32)
       } else if (mode === 'attract') {
         drawLogo(top)
-        place(caption('of the Velvet Sunset', 22), top + 40)
-        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 82)
+        place(ornate('of the Velvet Sunset', 17), top + 50)
+        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 92)
       } else {
         place(chrome('Game Over', 56), H * 0.38)
         place(caption(`Score ${score}  ·  tap or press SPACE`, 19), H * 0.38 + 46)
