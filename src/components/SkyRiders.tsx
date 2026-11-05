@@ -3020,11 +3020,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       ]
       const ref = credit([['BONUS', '#ffc65c']])
       const step = ref.img.height
-      const bottom = LH - 2
+      // keep the same space below the block as there is above the logo
+      const title = logo('SkyRiders', 92)
+      const logoTop = Math.max(4, X(H * 0.25) - Math.round((title.base / 1.15) * 0.85))
+      const bottom = LH - logoTop
       const topOfBlock = bottom - step * lines.length
-      // the band: a few rows easing in, then a steady shade
-      for (let y = topOfBlock - 6; y < LH; y++) {
-        const f = Math.min(1, (y - (topOfBlock - 6)) / 10)
+      // the band behind it: easing in above and out below
+      for (let y = topOfBlock - 6; y < bottom + 6; y++) {
+        const f = Math.min(1, (y - (topOfBlock - 6)) / 8, (bottom + 6 - y) / 8)
         b.fillStyle = `rgba(13,2,33,${0.5 * f})`
         b.fillRect(0, y, LW, 1)
       }

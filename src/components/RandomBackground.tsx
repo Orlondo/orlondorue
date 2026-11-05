@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { backgrounds } from '@/data/backgrounds'
+import { backgrounds, type Background } from '@/data/backgrounds'
 import SkyRiders from '@/components/SkyRiders'
 
 const LAST_KEY = 'orlondorue:last-background'
@@ -21,7 +21,8 @@ function pickIndex(still: boolean): number {
   return next
 }
 
-export default function RandomBackground() {
+// `onPick` tells the page which kind of background it got, so it can step aside for the game.
+export default function RandomBackground({ onPick }: { onPick?: (type: Background['type']) => void }) {
   const [index, setIndex] = useState<number | null>(null)
   const [still, setStill] = useState(false)
   const [ready, setReady] = useState(false)
@@ -35,10 +36,11 @@ export default function RandomBackground() {
     const gameIndex = backgrounds.findIndex((b) => b.type === 'game')
     const picked = forceGame && gameIndex >= 0 ? gameIndex : pickIndex(reduce)
     setIndex(picked)
+    onPick?.(backgrounds[picked].type)
     if (backgrounds[picked].type === 'game') setReady(true)
     const showAnyway = window.setTimeout(() => setReady(true), 3000)
     return () => window.clearTimeout(showAnyway)
-  }, [])
+  }, []) // chosen once per visit
 
   const item = index === null ? null : backgrounds[index]
   const fill = `absolute inset-0 h-full w-full object-cover transition-opacity duration-[1600ms] ease-out ${
