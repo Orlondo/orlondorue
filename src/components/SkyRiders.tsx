@@ -1626,6 +1626,49 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       return made
     }
 
+    // A centred line of small capitals that can change colour part-way, shrinking to fit a narrow screen.
+    const credit = (parts: [string, string][], size: number): Label => {
+      const key = `credit|${parts.map((p) => p.join(':')).join('|')}|${size}`
+      const cached = labels.get(key)
+      if (cached) return cached
+      const face = (n: number) => `bold ${n}px Verdana, 'Trebuchet MS', Arial, sans-serif`
+      const probe = document.createElement('canvas').getContext('2d')
+      let px = Math.max(8, Math.round(size * k))
+      const text = parts.map(([s]) => s).join('')
+      if (probe) {
+        probe.font = face(px)
+        while (px > 6 && probe.measureText(text).width > LW - 10) {
+          px--
+          probe.font = face(px)
+        }
+      }
+      const cv = document.createElement('canvas')
+      cv.width = LW
+      cv.height = Math.ceil(px * 1.4)
+      const base = Math.round(px * 1.12)
+      const c = cv.getContext('2d')
+      let half = 0
+      if (c) {
+        c.font = face(px)
+        c.textAlign = 'left'
+        c.lineJoin = 'round'
+        half = c.measureText(text).width / 2
+        let x = LW / 2 - half
+        for (const [s, colour] of parts) {
+          c.strokeStyle = '#0d0221'
+          c.lineWidth = 2
+          c.strokeText(s, x, base)
+          c.fillStyle = colour
+          c.fillText(s, x, base)
+          x += c.measureText(s).width
+        }
+      }
+      quantize(cv, 0, false)
+      const made = { img: cv, base, half }
+      labels.set(key, made)
+      return made
+    }
+
     // The subtitle: spaced gold capitals between thin rules ending in little diamonds.
     const ornate = (s: string, size: number): Label => {
       const key = `ornate|${s}|${size}`
@@ -1756,6 +1799,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let mode: Mode = 'attract'
     let score = 0
     let lives = 3
+    let nextBonus = 20000 // a bonus rider every 20,000 points
     let wave = 1
     let t = 0
     let raf = 0
@@ -1871,6 +1915,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       player = spawnHero()
       score = 0
       lives = 3
+      nextBonus = 20000
       wave = 1
       sparks = []
       embers = []
@@ -2921,6 +2966,44 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const place = (l: Label, worldY: number) => b.drawImage(l.img, 0, X(worldY) - l.base)
 
+    // The bottom of the attract screen: the prompt to play, then the credits, over a dark band that fades
+    // up out of the lava so the small lettering reads.
+    const drawCredits = () => {
+      const lines: (Label | null)[] = [
+        Math.floor(t / 40) % 2 ? credit([['PRESS SPACE OR TAP TO RIDE', '#fff6c8']], 18) : null,
+        credit(
+          [
+            ['PRESENTED BY ', '#7fd6c2'],
+            ['ORLONDO RUE', '#ffc65c'],
+          ],
+          15,
+        ),
+        credit(
+          [
+            ['BONUS RIDER EVERY ', '#ffc65c'],
+            ['20,000', '#d7c4ff'],
+            [' POINTS', '#ffc65c'],
+          ],
+          15,
+        ),
+        credit([[`\u00A9 ${new Date().getFullYear()} ORLONDO RUE`, '#a98cf0']], 15),
+      ]
+      const ref = credit([['PRESENTED BY ', '#7fd6c2']], 15)
+      const step = ref.img.height
+      const bottom = LH - 2
+      const topOfBlock = bottom - step * lines.length
+      // the band: a few rows easing in, then a steady shade
+      for (let y = topOfBlock - 6; y < LH; y++) {
+        const f = Math.min(1, (y - (topOfBlock - 6)) / 10)
+        b.fillStyle = `rgba(13,2,33,${0.5 * f})`
+        b.fillRect(0, y, LW, 1)
+      }
+      lines.forEach((l, i) => {
+        if (!l) return
+        b.drawImage(l.img, 0, topOfBlock + step * i)
+      })
+    }
+
     // the logo's shine is composed on its own small canvas each frame
     const shine = document.createElement('canvas')
     const sh = shine.getContext('2d')
@@ -3127,6 +3210,12 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
             if (player.y > LAVA_Y) loseLife('lava')
           }
           nextArrival()
+          if (mode === 'play' && score >= nextBonus) {
+            lives++
+            nextBonus += 20000
+            popups.push({ x: player.x, y: player.y - 30, text: 'BONUS RIDER', life: 80 })
+            chime([784, 988, 1175, 1568], 'square')
+          }
           updateEmbers()
           updatePower()
           if (!arrivals.length && !embers.length && enemies.every((e) => !e.alive)) {
@@ -3188,7 +3277,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       } else if (mode === 'attract') {
         drawLogo(top)
         place(ornate('of the Velvet Sunset', 17), top + 50)
-        if (Math.floor(t / 40) % 2) place(caption('Press SPACE or tap to ride', 17), top + 92)
+        drawCredits()
       } else {
         place(chrome('Game Over', 56), H * 0.38)
         place(caption(`Score ${score}  ·  tap or press SPACE`, 19), H * 0.38 + 46)
