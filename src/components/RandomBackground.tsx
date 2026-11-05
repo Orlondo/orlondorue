@@ -4,17 +4,29 @@ import SkyRiders from '@/components/SkyRiders'
 
 const LAST_KEY = 'orlondorue:last-background'
 
-// A random one, and never the same as the last visit (when the browser lets us remember it).
-// People who prefer less motion never get the game.
+// How often each kind of background comes up. The kind is chosen first, by these weights, and then one
+// entry of that kind at random, so adding more pictures doesn't crowd out the clips or the game.
+const WEIGHTS: Record<Background['type'], number> = { image: 0.5, video: 0.4, game: 0.1 }
+
+// Never the same entry twice in a row when its kind has others to choose from (a kind with only one entry,
+// like a single clip, can repeat). People who prefer less motion never get the game.
 function pickIndex(still: boolean): number {
   let last = -1
   try {
     last = Number(window.localStorage.getItem(LAST_KEY) ?? -1)
   } catch {}
-  const allowed = backgrounds.map((_, i) => i).filter((i) => !(still && backgrounds[i].type === 'game'))
-  let pos = Math.floor(Math.random() * allowed.length)
-  if (allowed.length > 1 && allowed[pos] === last) pos = (pos + 1) % allowed.length
-  const next = allowed[pos]
+  const byType = new Map<Background['type'], number[]>()
+  backgrounds.forEach((b, i) => {
+    if (still && b.type === 'game') return
+    byType.set(b.type, [...(byType.get(b.type) ?? []), i])
+  })
+  const kinds = [...byType.keys()]
+  const total = kinds.reduce((sum, kind) => sum + WEIGHTS[kind], 0)
+  let roll = Math.random() * total
+  const kind = kinds.find((k) => (roll -= WEIGHTS[k]) < 0) ?? kinds[kinds.length - 1]
+  const options = byType.get(kind) ?? [0]
+  const fresh = options.length > 1 ? options.filter((i) => i !== last) : options
+  const next = fresh[Math.floor(Math.random() * fresh.length)]
   try {
     window.localStorage.setItem(LAST_KEY, String(next))
   } catch {}
