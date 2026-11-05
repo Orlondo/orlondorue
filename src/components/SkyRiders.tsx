@@ -1,20 +1,20 @@
 import { useEffect, useRef } from 'react'
 
 // SkyRiders of the Velvet Sunset: an original flap-and-collide arcade game with a 70s van-mural sunset,
-// drawn in a 16-bit console style. A hero on a winged horse battles sorcerers on griffins above a molten lake.
+// drawn as a 16-bit pixel-art piece. A hero on a winged horse battles sorcerers on griffins above a molten lake.
 // Whoever is higher when they meet wins. When nobody is playing it runs an attract mode where the hero flies itself.
 //
-// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 240 pixels tall on a
-// wide screen), then scaled up with hard square pixels. The painted scenery, the sprites and the lettering are drawn
-// once, then snapped to a fixed palette, with checkerboard dithering on the scenery and dark outlines on the sprites.
-// Stars, lava, sparks and glints are drawn pixel by pixel every frame.
+// How the 16-bit look works: everything is drawn into a small low-resolution buffer (about 300 pixels tall on a
+// wide screen), then scaled up with hard square pixels. The scenery, islands, clouds, sprites and lettering are
+// painted once as shapes and then snapped to a fixed palette, with checkerboard dithering and one-pixel outlines.
+// Stars, lava, lavafalls, sparks and glints are drawn pixel by pixel every frame.
 //
 // The game fills whatever box it is given. The game world is 500 units tall on wide screens and 400 units wide on
 // tall ones, and stretches along the other side to match the screen, so nothing is cropped or letterboxed.
 
 const GRAVITY = 0.22
 const FLAP = -4.2
-const SPRITE_SCALE = 1.3
+const SPRITE_SCALE = 1.45
 
 type Rider = { x: number; y: number; vx: number; vy: number; dir: number; wing: number; alive: boolean; safe: number }
 type Mode = 'attract' | 'play' | 'over'
@@ -23,6 +23,8 @@ type Spark = { x: number; y: number; vx: number; vy: number; life: number; max: 
 type Star = { x: number; y: number; phase: number; burst: boolean }
 type Frame = { img: HTMLCanvasElement; ox: number; oy: number }
 type Label = { img: HTMLCanvasElement; base: number; half: number }
+type Cloud = { img: HTMLCanvasElement; x: number; y: number; speed: number; w: number }
+type Fall = { x: number; top: number }
 type Draw = CanvasRenderingContext2D
 
 // Ledges as fractions of the world, so they spread out on any screen shape.
@@ -41,7 +43,7 @@ const PALETTE = [
   '#5a2a7a', '#7a52b8', '#a98cf0', '#d7c4ff', '#9fdcff', '#5aa8ff', '#2a6ad8', '#29f0ff', '#1fb8e0', '#c9fff6',
   '#e8b46a', '#d0964a', '#9a5a2a', '#6b3d1c', '#4a1f10', '#ff3b6b', '#c0102a', '#6d0a2e', '#ff3d7f', '#ffd56b',
   '#e8dcc8', '#cdbfe0', '#8a9bc8', '#4b3a8f', '#a9b8ff', '#f4f0ff', '#ff9de2', '#b388ff', '#ff5a1f', '#e8250f',
-  '#4a0218',
+  '#4a0218', '#14325a', '#1f6a8a', '#3d2a6a',
 ]
 const rgb = (h: string) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]
 const PAL = PALETTE.map(rgb)
@@ -118,152 +120,357 @@ const quantize = (cv: HTMLCanvasElement, dither: number, outline: boolean) => {
   g.putImageData(img, 0, 0)
 }
 
-// Repeatable pseudo-random numbers, so the mountains and stars look the same on every visit.
+// Repeatable pseudo-random numbers, so the scenery looks the same on every visit.
 const seeded = (seed: number) => () => {
   seed = (seed * 16807) % 2147483647
   return (seed - 1) / 2147483646
 }
 
+const linear = (c: Draw, y0: number, y1: number, stops: [number, string][]) => {
+  const g = c.createLinearGradient(0, y0, 0, y1)
+  for (const [at, col] of stops) g.addColorStop(at, col)
+  return g
+}
+
 // ---- sprite art, drawn as shapes and then pixelated ----
 
-// A feathered wing; `lift` raises it for a flap or lowers it for a glide.
-const wing = (c: Draw, lift: number, light: string, dark: string, tip: string) => {
-  for (let k = 0; k < 4; k++) {
-    const g = c.createLinearGradient(0, -4, -30, lift - 10)
+// A feathered wing; `lift` raises it for a flap or lowers it for a glide. Each feather gets a darker edge.
+const wing = (c: Draw, lift: number, light: string, dark: string, tip: string, edge: string) => {
+  for (let k = 0; k < 5; k++) {
+    const g = c.createLinearGradient(0, -4, -32, lift - 10)
     g.addColorStop(0, light)
-    g.addColorStop(0.7, dark)
+    g.addColorStop(0.6, dark)
     g.addColorStop(1, tip)
     c.fillStyle = g
     c.beginPath()
-    c.moveTo(4 - k * 3, -2)
-    c.quadraticCurveTo(-6 - k * 4, lift - 18 + k * 4, -24 + k * 3, lift - 10 + k * 6)
-    c.quadraticCurveTo(-10 - k * 2, lift - 2 + k * 3, 2 - k * 3, 2)
+    c.moveTo(5 - k * 3, -3)
+    c.quadraticCurveTo(-6 - k * 4, lift - 20 + k * 4, -27 + k * 3.5, lift - 11 + k * 5.5)
+    c.quadraticCurveTo(-10 - k * 2, lift - 2 + k * 3, 3 - k * 3, 2)
     c.closePath()
     c.fill()
+    c.strokeStyle = edge
+    c.lineWidth = 1.2
+    c.stroke()
   }
+  // the covert feathers along the top of the wing
+  c.fillStyle = light
+  c.beginPath()
+  c.moveTo(6, -3)
+  c.quadraticCurveTo(-4, lift - 12, -14, lift - 8)
+  c.quadraticCurveTo(-4, lift - 2, 4, 2)
+  c.closePath()
+  c.fill()
 }
 
-// Hero: a pale winged horse with a golden mane and a rider in a flowing cyan cape.
+// Hero: a white winged horse with a golden mane, a red saddle cloth and an armoured rider in a cyan cape.
 const drawHero = (c: Draw, lift: number, gallop: number) => {
-  c.strokeStyle = '#ffd56b'
-  c.lineWidth = 4
+  // the far wing sits behind everything, in shadow
+  c.save()
+  c.translate(3, -2)
+  wing(c, lift - 3, '#cdbfe0', '#a98cf0', '#8e2a7e', '#5a2a7a')
+  c.restore()
+  // tail
   c.lineCap = 'round'
+  c.strokeStyle = '#e8b46a'
+  c.lineWidth = 5
   c.beginPath()
-  c.moveTo(-15, 2)
-  c.quadraticCurveTo(-26, -2 + gallop, -32, 9)
+  c.moveTo(-15, 1)
+  c.quadraticCurveTo(-27, -3 + gallop, -33, 9)
   c.stroke()
-  c.strokeStyle = '#e8dcc8'
+  c.strokeStyle = '#ffe08a'
+  c.lineWidth = 2
+  c.beginPath()
+  c.moveTo(-16, 0)
+  c.quadraticCurveTo(-26, -4 + gallop, -31, 6)
+  c.stroke()
+  // far legs, darker
+  c.strokeStyle = '#a98cf0'
   c.lineWidth = 3
   c.beginPath()
-  c.moveTo(-8, 8)
-  c.lineTo(-12, 15 + gallop)
-  c.moveTo(8, 8)
-  c.lineTo(12, 14 - gallop)
+  c.moveTo(-10, 7)
+  c.lineTo(-15, 13 + gallop)
+  c.lineTo(-12, 17 + gallop)
+  c.moveTo(10, 7)
+  c.lineTo(15, 12 - gallop)
+  c.lineTo(19, 13 - gallop)
   c.stroke()
-  const body = c.createLinearGradient(0, -6, 0, 12)
-  body.addColorStop(0, '#ffffff')
-  body.addColorStop(1, '#cdbfe0')
-  c.fillStyle = body
+  // body with a sheen on the shoulder and shade on the belly
+  c.fillStyle = linear(c, -6, 12, [
+    [0, '#ffffff'],
+    [0.55, '#e8dcc8'],
+    [1, '#a98cf0'],
+  ])
   c.beginPath()
-  c.ellipse(0, 3, 17, 8, 0, 0, Math.PI * 2)
+  c.ellipse(0, 3, 17, 8.5, 0, 0, Math.PI * 2)
   c.fill()
+  c.fillStyle = 'rgba(255,255,255,0.9)'
+  c.beginPath()
+  c.ellipse(7, 0, 6, 3, -0.3, 0, Math.PI * 2)
+  c.fill()
+  // neck and head
+  c.fillStyle = linear(c, -16, 6, [
+    [0, '#ffffff'],
+    [1, '#e8dcc8'],
+  ])
   c.beginPath()
   c.moveTo(10, -1)
-  c.quadraticCurveTo(17, -10, 21, -14)
-  c.lineTo(27, -11)
-  c.quadraticCurveTo(28, -8, 25, -7)
-  c.lineTo(20, -6)
+  c.quadraticCurveTo(17, -10, 20, -15)
+  c.lineTo(23, -17)
+  c.lineTo(28, -12)
+  c.quadraticCurveTo(30, -8, 26, -7)
+  c.lineTo(21, -6)
   c.quadraticCurveTo(18, 2, 13, 6)
   c.closePath()
   c.fill()
+  c.fillStyle = '#cdbfe0'
+  c.beginPath()
+  c.ellipse(27, -9, 2.6, 2.2, 0, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#ffffff'
+  c.beginPath()
+  c.moveTo(20, -15)
+  c.lineTo(21, -21)
+  c.lineTo(23, -16)
+  c.fill()
   c.fillStyle = '#2b0a4a'
-  c.fillRect(21.5, -12.5, 2.5, 2.5)
-  c.strokeStyle = '#ffc65c'
-  c.lineWidth = 3.5
+  c.fillRect(22, -13.5, 2.4, 2.4)
+  // flowing mane in three locks
+  const mane = ['#ffc65c', '#ffe08a', '#e8b46a']
+  mane.forEach((col, i) => {
+    c.strokeStyle = col
+    c.lineWidth = 3
+    c.beginPath()
+    c.moveTo(21 - i * 2, -16 + i * 2)
+    c.quadraticCurveTo(13 - i * 2, -14 + gallop * 0.5 + i * 3, 8 - i, -4 + i * 2)
+    c.stroke()
+  })
+  // near legs with dark hooves
+  c.strokeStyle = '#f4f0ff'
+  c.lineWidth = 3.4
   c.beginPath()
-  c.moveTo(20, -14)
-  c.quadraticCurveTo(13, -12 + gallop * 0.5, 9, -3)
+  c.moveTo(-7, 8)
+  c.lineTo(-11, 14 + gallop)
+  c.lineTo(-8, 18 + gallop)
+  c.moveTo(7, 8)
+  c.lineTo(12, 13 - gallop)
+  c.lineTo(16, 15 - gallop)
   c.stroke()
-  c.fillStyle = '#29f0ff'
+  c.fillStyle = '#3d2a6a'
+  c.fillRect(-9.5, 17 + gallop, 4, 2.6)
+  c.fillRect(15, 14 - gallop, 4, 2.6)
+  // saddle cloth with gold trim
+  c.fillStyle = '#c0102a'
   c.beginPath()
-  c.moveTo(-1, -16)
-  c.quadraticCurveTo(-14, -14 + gallop, -24, -6 + gallop)
+  c.moveTo(-8, -4)
+  c.lineTo(7, -4)
+  c.lineTo(5, 6)
+  c.lineTo(-6, 6)
+  c.closePath()
+  c.fill()
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 1.5
+  c.beginPath()
+  c.moveTo(-6, 6)
+  c.lineTo(5, 6)
+  c.stroke()
+  // cape streaming behind the rider
+  c.fillStyle = linear(c, -18, 0, [
+    [0, '#29f0ff'],
+    [1, '#2a6ad8'],
+  ])
+  c.beginPath()
+  c.moveTo(-1, -17)
+  c.quadraticCurveTo(-15, -15 + gallop, -27, -6 + gallop)
+  c.lineTo(-22, -3 + gallop)
   c.quadraticCurveTo(-12, -6, 1, -6)
   c.closePath()
   c.fill()
-  c.fillStyle = '#1fb8e0'
-  c.fillRect(-3, -15, 7, 11)
-  const helm = c.createRadialGradient(0, -20, 0, 1, -18, 5)
-  helm.addColorStop(0, '#ffffff')
-  helm.addColorStop(1, '#8a9bc8')
-  c.fillStyle = helm
+  // armoured torso, belt and arm
+  c.fillStyle = linear(c, -16, -4, [
+    [0, '#c9fff6'],
+    [0.5, '#9fdcff'],
+    [1, '#5aa8ff'],
+  ])
+  c.fillRect(-3.5, -16, 8, 11)
+  c.fillStyle = '#ffc65c'
+  c.fillRect(-3.5, -7, 8, 2)
+  c.strokeStyle = '#9fdcff'
+  c.lineWidth = 2.6
   c.beginPath()
-  c.arc(1, -18, 4.5, 0, Math.PI * 2)
-  c.fill()
-  c.strokeStyle = '#ffffff'
-  c.lineWidth = 2.5
-  c.beginPath()
-  c.moveTo(3, -9)
-  c.lineTo(24, -16)
+  c.moveTo(2, -13)
+  c.lineTo(6, -9)
   c.stroke()
-  wing(c, lift, '#ffffff', '#ffe08a', '#ff9de2')
+  // helmet with a visor slit and a pink plume
+  c.fillStyle = linear(c, -24, -15, [
+    [0, '#ffffff'],
+    [1, '#8a9bc8'],
+  ])
+  c.beginPath()
+  c.arc(1, -19, 4.8, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#2b0a4a'
+  c.fillRect(1.5, -19.5, 4, 1.4)
+  c.strokeStyle = '#ff3d7f'
+  c.lineWidth = 3
+  c.beginPath()
+  c.moveTo(0, -23)
+  c.quadraticCurveTo(-6, -29, -12, -24 + gallop * 0.5)
+  c.stroke()
+  // sword: gold crossguard and a long bright blade
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 2.4
+  c.beginPath()
+  c.moveTo(6.5, -12.5)
+  c.lineTo(5, -7)
+  c.stroke()
+  c.strokeStyle = '#f4f0ff'
+  c.lineWidth = 2.4
+  c.beginPath()
+  c.moveTo(6, -10)
+  c.lineTo(27, -17)
+  c.stroke()
+  c.strokeStyle = '#9fdcff'
+  c.lineWidth = 0.9
+  c.beginPath()
+  c.moveTo(8, -10.2)
+  c.lineTo(26, -16.4)
+  c.stroke()
+  // the near wing over the top
+  wing(c, lift, '#ffffff', '#ffe08a', '#ff9de2', '#d7c4ff')
 }
 
-// Foe: a bronze griffin with an eagle head, ridden by a hooded sorcerer with a glowing staff.
+// Foe: a bronze griffin with a white feathered head and talons, ridden by a hooded sorcerer with a glowing staff.
 const drawFoe = (c: Draw, lift: number) => {
-  c.strokeStyle = '#6b3d1c'
-  c.lineWidth = 2.5
+  c.save()
+  c.translate(3, -2)
+  wing(c, lift - 3, '#9a5a2a', '#6b3d1c', '#4a1f10', '#4a1f10')
+  c.restore()
+  // lion tail with a dark tuft
+  c.lineCap = 'round'
+  c.strokeStyle = '#9a5a2a'
+  c.lineWidth = 2.4
   c.beginPath()
   c.moveTo(-15, 2)
-  c.quadraticCurveTo(-25, 6, -28, -2)
+  c.quadraticCurveTo(-25, 8, -29, -2)
   c.stroke()
-  const body = c.createLinearGradient(0, -6, 0, 12)
-  body.addColorStop(0, '#d0964a')
-  body.addColorStop(1, '#6b3d1c')
-  c.fillStyle = body
+  c.fillStyle = '#4a1f10'
   c.beginPath()
-  c.ellipse(0, 3, 16, 8, 0, 0, Math.PI * 2)
+  c.ellipse(-29, -3, 3, 2.4, 0.6, 0, Math.PI * 2)
   c.fill()
-  c.fillStyle = '#f4f0ff'
+  // hind legs with paws
+  c.strokeStyle = '#9a5a2a'
+  c.lineWidth = 3.4
   c.beginPath()
-  c.arc(16, -6, 6, 0, Math.PI * 2)
+  c.moveTo(-9, 7)
+  c.lineTo(-13, 14)
+  c.moveTo(-4, 8)
+  c.lineTo(-6, 15)
+  c.stroke()
+  // body: tawny lion back blending into a feathered chest
+  c.fillStyle = linear(c, -6, 12, [
+    [0, '#e8b46a'],
+    [0.6, '#d0964a'],
+    [1, '#6b3d1c'],
+  ])
+  c.beginPath()
+  c.ellipse(0, 3, 16, 8.5, 0, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#e8dcc8'
+  c.beginPath()
+  c.ellipse(11, 2, 7, 6.5, 0, 0, Math.PI * 2)
+  c.fill()
+  c.strokeStyle = '#cdbfe0'
+  c.lineWidth = 1
+  for (let i = 0; i < 3; i++) {
+    c.beginPath()
+    c.arc(11, -1 + i * 3, 4, 0.2, Math.PI - 0.2)
+    c.stroke()
+  }
+  // yellow talons reaching forward
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 2.6
+  c.beginPath()
+  c.moveTo(12, 7)
+  c.lineTo(17, 13)
+  c.lineTo(21, 12)
+  c.moveTo(8, 8)
+  c.lineTo(11, 15)
+  c.lineTo(15, 15)
+  c.stroke()
+  // eagle head, ear tufts and hooked beak
+  c.fillStyle = linear(c, -13, 0, [
+    [0, '#ffffff'],
+    [1, '#e8dcc8'],
+  ])
+  c.beginPath()
+  c.arc(16, -6, 6.5, 0, Math.PI * 2)
+  c.fill()
+  c.fillStyle = '#d0964a'
+  c.beginPath()
+  c.moveTo(12, -10)
+  c.lineTo(9, -17)
+  c.lineTo(15, -12)
   c.fill()
   c.fillStyle = '#ffa94d'
   c.beginPath()
-  c.moveTo(21, -8)
-  c.quadraticCurveTo(28, -7, 25, -2)
+  c.moveTo(21, -9)
+  c.quadraticCurveTo(29, -8, 26, -1)
   c.lineTo(21, -4)
   c.closePath()
   c.fill()
   c.fillStyle = '#c0102a'
-  c.fillRect(16.5, -8.5, 2.5, 2.5)
-  const robe = c.createLinearGradient(0, -24, 0, -2)
-  robe.addColorStop(0, '#ff3b6b')
-  robe.addColorStop(1, '#6d0a2e')
-  c.fillStyle = robe
+  c.fillRect(16.5, -9, 2.6, 2.6)
+  // sorcerer: crimson robe with a gold hem, sleeves and a deep hood with glowing eyes
+  c.fillStyle = linear(c, -28, -2, [
+    [0, '#ff3b6b'],
+    [0.6, '#c0102a'],
+    [1, '#6d0a2e'],
+  ])
   c.beginPath()
-  c.moveTo(1, -26)
-  c.lineTo(8, -3)
-  c.lineTo(-7, -3)
+  c.moveTo(0, -29)
+  c.quadraticCurveTo(3, -22, 9, -3)
+  c.lineTo(-8, -3)
+  c.quadraticCurveTo(-3, -20, 0, -29)
   c.closePath()
   c.fill()
+  c.strokeStyle = '#ffc65c'
+  c.lineWidth = 1.6
+  c.beginPath()
+  c.moveTo(-8, -3.5)
+  c.lineTo(9, -3.5)
+  c.stroke()
   c.fillStyle = '#1a0629'
   c.beginPath()
-  c.arc(1.5, -16, 3, 0, Math.PI * 2)
+  c.ellipse(1.5, -19, 3.4, 3.8, 0, 0, Math.PI * 2)
   c.fill()
-  c.strokeStyle = '#4a1f10'
-  c.lineWidth = 2.5
+  c.fillStyle = '#29f0ff'
+  c.fillRect(1.5, -20, 1.6, 1.6)
+  c.fillRect(4, -20, 1.6, 1.6)
+  c.strokeStyle = '#c0102a'
+  c.lineWidth = 3
   c.beginPath()
-  c.moveTo(6, -4)
-  c.lineTo(12, -24)
+  c.moveTo(2, -14)
+  c.lineTo(7, -10)
   c.stroke()
+  // a gnarled staff topped with a violet orb
+  c.strokeStyle = '#4a1f10'
+  c.lineWidth = 2.4
+  c.beginPath()
+  c.moveTo(6, -3)
+  c.lineTo(10, -16)
+  c.lineTo(12, -25)
+  c.stroke()
+  c.fillStyle = 'rgba(179,136,255,0.55)'
+  c.beginPath()
+  c.arc(12, -28, 6.5, 0, Math.PI * 2)
+  c.fill()
   c.fillStyle = '#b388ff'
   c.beginPath()
-  c.arc(12, -26, 4.5, 0, Math.PI * 2)
+  c.arc(12, -28, 4, 0, Math.PI * 2)
   c.fill()
   c.fillStyle = '#ffffff'
-  c.fillRect(11, -27.5, 2, 2)
-  wing(c, lift, '#e8b46a', '#9a5a2a', '#4a1f10')
+  c.fillRect(10.5, -30, 2.2, 2.2)
+  wing(c, lift, '#e8b46a', '#9a5a2a', '#4a1f10', '#6b3d1c')
 }
 
 // Wing positions for the animation frames: a flap, then three glide poses.
@@ -290,170 +497,514 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     let W = 800
     let H = 500
     let LAVA_Y = H - 40
-    let LW = 360 // buffer width and height in pixels
-    let LH = 225
+    let LW = 480 // buffer width and height in pixels
+    let LH = 300
     let k = LH / H // world units to buffer pixels
-    let pixel = 4 // screen pixels per buffer pixel
+    let pixel = 3 // screen pixels per buffer pixel
     let platforms: Platform[] = []
     let stars: Star[] = []
+    let clouds: Cloud[] = []
+    let falls: Fall[] = []
     let heroFrames: Frame[] = []
     let foeFrames: Frame[] = []
     const backdrop = document.createElement('canvas')
+    const islands = document.createElement('canvas')
     const labels = new Map<string, Label>()
 
     const X = (wx: number) => Math.round(wx * k)
 
-    // ---- the painted scenery, drawn once per screen size and then pixelated with dithering ----
+    // ---- the painted scenery behind everything, drawn once per screen size ----
     const paintBackdrop = () => {
       const c = backdrop.getContext('2d')
       if (!c) return
       c.setTransform(k, 0, 0, k, 0, 0)
       const horizon = LAVA_Y - 40
+      const rand = seeded(11)
 
-      const sky = c.createLinearGradient(0, 0, 0, horizon)
-      sky.addColorStop(0, '#0d0221')
-      sky.addColorStop(0.3, '#3b0f5c')
-      sky.addColorStop(0.55, '#8e2a7e')
-      sky.addColorStop(0.78, '#e8506a')
-      sky.addColorStop(0.92, '#ff8a3d')
-      sky.addColorStop(1, '#ffc65c')
+      // sky: deep space at the top, through violet and rose, to a gold glow at the horizon
+      const sky = linear(c, 0, horizon, [
+        [0, '#0d0221'],
+        [0.18, '#2b0a4a'],
+        [0.36, '#4e1a72'],
+        [0.55, '#8e2a7e'],
+        [0.7, '#d4508a'],
+        [0.8, '#e8506a'],
+        [0.9, '#ff8a3d'],
+        [1, '#ffc65c'],
+      ])
       c.fillStyle = sky
       c.fillRect(0, 0, W, H)
 
-      // the big striped sunset sun, with a halo behind it
+      // nebula clouds in the high sky
+      const blob = (fx: number, fy: number, r: number, col: string) => {
+        c.save()
+        c.translate(fx * W, fy * H)
+        c.scale(1.6, 0.6)
+        const g = c.createRadialGradient(0, 0, 0, 0, 0, r)
+        g.addColorStop(0, col)
+        g.addColorStop(1, 'rgba(0,0,0,0)')
+        c.fillStyle = g
+        c.fillRect(-r, -r, r * 2, r * 2)
+        c.restore()
+      }
+      blob(0.28, 0.1, 160, 'rgba(255,61,127,0.28)')
+      blob(0.62, 0.06, 140, 'rgba(41,240,255,0.16)')
+      blob(0.5, 0.2, 120, 'rgba(179,136,255,0.24)')
+      blob(0.85, 0.24, 100, 'rgba(255,61,127,0.18)')
+
+      // an aurora ribbon rippling across the sky
+      for (const [col, off, width] of [
+        ['rgba(41,240,255,0.16)', 0, 18],
+        ['rgba(255,157,226,0.14)', 10, 10],
+      ] as [string, number, number][]) {
+        c.strokeStyle = col
+        c.lineWidth = width
+        c.beginPath()
+        for (let x = -20; x <= W + 20; x += 8) {
+          const y = H * 0.16 + off + Math.sin(x * 0.012) * 18 + Math.sin(x * 0.031) * 7
+          if (x === -20) c.moveTo(x, y)
+          else c.lineTo(x, y)
+        }
+        c.stroke()
+      }
+
+      // the sun: rays fanning up from it, halo rings, then the striped disc
       const sunR = Math.min(W, H) * 0.24
       const sunX = W / 2
       const sunY = horizon - sunR * 0.35
-      const halo = c.createRadialGradient(sunX, sunY, sunR * 0.6, sunX, sunY, sunR * 2.2)
-      halo.addColorStop(0, 'rgba(255,200,120,0.55)')
+      c.save()
+      c.beginPath()
+      c.rect(0, 0, W, horizon)
+      c.clip()
+      for (let i = 0; i < 14; i++) {
+        const a0 = Math.PI + (i / 14) * Math.PI
+        const a1 = a0 + Math.PI / 30
+        c.fillStyle = i % 2 ? 'rgba(255,214,140,0.1)' : 'rgba(255,157,226,0.06)'
+        c.beginPath()
+        c.moveTo(sunX, sunY)
+        c.lineTo(sunX + Math.cos(a0) * W, sunY + Math.sin(a0) * W)
+        c.lineTo(sunX + Math.cos(a1) * W, sunY + Math.sin(a1) * W)
+        c.closePath()
+        c.fill()
+      }
+      c.restore()
+      const halo = c.createRadialGradient(sunX, sunY, sunR * 0.6, sunX, sunY, sunR * 2.4)
+      halo.addColorStop(0, 'rgba(255,200,120,0.6)')
       halo.addColorStop(1, 'rgba(255,110,120,0)')
       c.fillStyle = halo
       c.fillRect(0, 0, W, H)
-      const sg = c.createLinearGradient(0, sunY - sunR, 0, sunY + sunR)
-      sg.addColorStop(0, '#fff6c8')
-      sg.addColorStop(0.45, '#ffc65c')
-      sg.addColorStop(0.75, '#ff8a3d')
-      sg.addColorStop(1, '#ff3d7f')
+      for (const [rr, a] of [
+        [1.22, 0.22],
+        [1.45, 0.14],
+        [1.72, 0.09],
+      ]) {
+        c.strokeStyle = `rgba(255,230,170,${a})`
+        c.lineWidth = 5
+        c.beginPath()
+        c.arc(sunX, sunY, sunR * rr, 0, Math.PI * 2)
+        c.stroke()
+      }
       c.save()
       c.beginPath()
       c.arc(sunX, sunY, sunR, 0, Math.PI * 2)
       c.clip()
-      c.fillStyle = sg
+      c.fillStyle = linear(c, sunY - sunR, sunY + sunR, [
+        [0, '#fff6c8'],
+        [0.4, '#ffe08a'],
+        [0.6, '#ffc65c'],
+        [0.8, '#ff8a3d'],
+        [1, '#ff3d7f'],
+      ])
       c.fillRect(sunX - sunR, sunY - sunR, sunR * 2, sunR * 2)
-      // the stripes across the sun, thicker and closer together toward the bottom, sized in whole buffer pixels
+      // stripes across the sun, thicker and closer together toward the bottom, in whole buffer pixels
       c.fillStyle = '#d4508a'
-      for (let i = 0, y = sunY - sunR * 0.72; i < 7 && y < sunY + sunR; i++) {
+      for (let i = 0, y = sunY - sunR * 0.72; i < 8 && y < sunY + sunR; i++) {
         const rows = 1 + Math.floor(i / 2)
         c.fillRect(sunX - sunR, Math.round(y * k) / k, sunR * 2, rows / k)
         y += (rows + Math.max(2, 5 - i)) / k
       }
       c.restore()
 
-      // a ringed planet and a small moon
+      // a banded gas planet with a tilted ring, and a cratered moon
       const px = W * 0.8
-      const py = H * 0.17
-      const pr = 30
+      const py = H * 0.16
+      const pr = 32
       c.save()
       c.translate(px, py)
       c.rotate(-0.35)
       c.strokeStyle = '#c46a8a'
-      c.lineWidth = 5
+      c.lineWidth = 6
       c.beginPath()
-      c.ellipse(0, 0, pr * 2, pr * 0.42, 0, Math.PI, Math.PI * 2)
+      c.ellipse(0, 0, pr * 2.05, pr * 0.42, 0, Math.PI, Math.PI * 2)
       c.stroke()
+      c.save()
+      c.beginPath()
+      c.arc(0, 0, pr, 0, Math.PI * 2)
+      c.clip()
       const pg = c.createRadialGradient(-pr * 0.4, -pr * 0.45, pr * 0.1, 0, 0, pr)
       pg.addColorStop(0, '#f4f0ff')
       pg.addColorStop(0.5, '#a9b8ff')
       pg.addColorStop(1, '#4b3a8f')
       c.fillStyle = pg
-      c.beginPath()
-      c.arc(0, 0, pr, 0, Math.PI * 2)
-      c.fill()
+      c.fillRect(-pr, -pr, pr * 2, pr * 2)
+      for (const [y, h, col] of [
+        [-14, 4, 'rgba(255,157,226,0.45)'],
+        [-4, 6, 'rgba(75,58,143,0.45)'],
+        [6, 3, 'rgba(255,157,226,0.35)'],
+        [13, 5, 'rgba(61,42,106,0.5)'],
+      ] as [number, number, string][]) {
+        c.fillStyle = col
+        c.fillRect(-pr, y, pr * 2, h)
+      }
+      // the night side
+      const shade = c.createLinearGradient(-pr, 0, pr, 0)
+      shade.addColorStop(0.45, 'rgba(13,2,33,0)')
+      shade.addColorStop(1, 'rgba(13,2,33,0.55)')
+      c.fillStyle = shade
+      c.fillRect(-pr, -pr, pr * 2, pr * 2)
+      c.restore()
       c.strokeStyle = '#ffc65c'
+      c.lineWidth = 6
       c.beginPath()
-      c.ellipse(0, 0, pr * 2, pr * 0.42, 0, 0, Math.PI)
+      c.ellipse(0, 0, pr * 2.05, pr * 0.42, 0, 0, Math.PI)
+      c.stroke()
+      c.strokeStyle = '#ffe08a'
+      c.lineWidth = 2
+      c.beginPath()
+      c.ellipse(0, 0, pr * 1.8, pr * 0.34, 0, 0.2, Math.PI - 0.2)
       c.stroke()
       c.restore()
-      const mg = c.createRadialGradient(W * 0.14 - 4, H * 0.12 - 4, 1, W * 0.14, H * 0.12, 12)
+      const mx = W * 0.14
+      const my = H * 0.12
+      const mg = c.createRadialGradient(mx - 5, my - 5, 1, mx, my, 14)
       mg.addColorStop(0, '#ffffff')
-      mg.addColorStop(1, '#a05a98')
+      mg.addColorStop(0.6, '#d7c4ff')
+      mg.addColorStop(1, '#8a4f9e')
       c.fillStyle = mg
       c.beginPath()
-      c.arc(W * 0.14, H * 0.12, 12, 0, Math.PI * 2)
+      c.arc(mx, my, 14, 0, Math.PI * 2)
       c.fill()
-
-      // long clouds lit from below
-      const rand = seeded(11)
-      for (let i = 0; i < 6; i++) {
-        const cx = rand() * W
-        const cy = horizon * (0.45 + rand() * 0.4)
-        const cw = W * (0.18 + rand() * 0.25)
-        const ch = 6 + rand() * 4
-        c.fillStyle = '#d4508a'
+      c.fillStyle = 'rgba(138,79,158,0.7)'
+      for (const [dx, dy, r] of [
+        [-4, 2, 3],
+        [4, -3, 2.2],
+        [3, 6, 2],
+      ]) {
         c.beginPath()
-        c.ellipse(cx, cy, cw / 2, ch, 0, 0, Math.PI * 2)
-        c.fill()
-        c.fillStyle = '#ffa94d'
-        c.beginPath()
-        c.ellipse(cx + cw * 0.05, cy + ch * 0.45, cw * 0.4, ch * 0.45, 0, 0, Math.PI * 2)
+        c.arc(mx + dx, my + dy, r, 0, Math.PI * 2)
         c.fill()
       }
 
-      // two ranges of jagged mountains, each with a lit rim
-      const range = (seed: number, base: number, height: number, step: number, top: string, low: string, rim: string) => {
+      // mountain ranges: a lit side facing the sun, a shaded side away from it, rock streaks and a glowing rim
+      const range = (
+        seed: number,
+        base: number,
+        height: number,
+        step: number,
+        colours: { top: string; low: string; shade: string; rim: string; streak?: string },
+      ) => {
         const r = seeded(seed)
         const pts: [number, number][] = []
-        for (let x = -step; x <= W + step; x += step) pts.push([x + (r() - 0.5) * step * 0.6, base - height * (0.35 + r() * 0.65)])
-        const g = c.createLinearGradient(0, base - height, 0, base)
-        g.addColorStop(0, top)
-        g.addColorStop(1, low)
-        c.fillStyle = g
+        let i = 0
+        for (let x = -step; x <= W + step; x += step / 2, i++) {
+          const peak = i % 2 === 0
+          pts.push([x + (r() - 0.5) * step * 0.3, base - height * (peak ? 0.55 + r() * 0.45 : 0.25 + r() * 0.3)])
+        }
+        c.fillStyle = linear(c, base - height, base, [
+          [0, colours.top],
+          [1, colours.low],
+        ])
         c.beginPath()
         c.moveTo(-step, H)
         for (const [x, y] of pts) c.lineTo(x, y)
         c.lineTo(W + step, H)
         c.closePath()
         c.fill()
-        c.strokeStyle = rim
-        c.lineWidth = 1.6 / k
+        for (let j = 0; j < pts.length; j += 2) {
+          const [x, y] = pts[j]
+          // the side facing away from the sun falls into shadow
+          const away = x < W / 2 ? pts[j - 1] : pts[j + 1]
+          if (!away) continue
+          c.fillStyle = colours.shade
+          c.beginPath()
+          c.moveTo(x, y)
+          c.lineTo(away[0], away[1])
+          c.lineTo(away[0], H)
+          c.lineTo(x, H)
+          c.closePath()
+          c.fill()
+          if (colours.streak) {
+            c.strokeStyle = colours.streak
+            c.lineWidth = 1 / k
+            for (let s = 0; s < 3; s++) {
+              const sx = x + (r() - 0.5) * step * 0.4
+              const sy = y + 6 + r() * 10
+              c.beginPath()
+              c.moveTo(sx, sy)
+              c.lineTo(sx + (r() - 0.5) * 14, sy + 14 + r() * 22)
+              c.stroke()
+            }
+          }
+        }
+        c.strokeStyle = colours.rim
+        c.lineWidth = 1.4 / k
         c.beginPath()
-        pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
+        pts.forEach(([x, y], j) => (j ? c.lineTo(x, y) : c.moveTo(x, y)))
         c.stroke()
+        return pts
       }
-      range(3, horizon + 10, 150, 70, '#8a4f9e', '#c46a8a', '#ffa94d')
-      range(5, LAVA_Y + 4, 95, 55, '#3b0f5c', '#1a0629', '#ff6f5a')
+      const farthest = range(2, horizon - 4, 125, 130, { top: '#c46a8a', low: '#e8506a', shade: 'rgba(160,90,152,0.35)', rim: '#ffc65c' })
 
-      // floating islands: a polished top with jagged rock hanging underneath
-      for (const p of platforms) {
-        const depth = 26
-        const rock = c.createLinearGradient(0, p.y, 0, p.y + depth)
-        rock.addColorStop(0, '#a05a98')
-        rock.addColorStop(1, '#3b0f5c')
-        c.fillStyle = rock
+      // a castle on the far ridge, its towers lit by the sunset
+      const castleX = W * 0.86
+      let ridge = horizon
+      for (let j = 1; j < farthest.length; j++) {
+        const [x0, y0] = farthest[j - 1]
+        const [x1, y1] = farthest[j]
+        if (castleX >= x0 && castleX <= x1) ridge = y0 + ((castleX - x0) / (x1 - x0)) * (y1 - y0)
+      }
+      const towers: [number, number, number][] = [
+        [-16, 26, 6],
+        [-6, 40, 7],
+        [5, 32, 6],
+        [14, 22, 5],
+      ]
+      c.fillStyle = '#a05a98'
+      c.fillRect(castleX - 18, ridge - 14, 36, 18)
+      for (const [dx, h, w] of towers) {
+        c.fillStyle = '#a05a98'
+        c.fillRect(castleX + dx - w / 2, ridge - h, w, h)
+        c.fillStyle = '#8e2a7e'
         c.beginPath()
-        c.moveTo(p.x - 2, p.y + 6)
+        c.moveTo(castleX + dx - w / 2 - 1.5, ridge - h)
+        c.lineTo(castleX + dx, ridge - h - w * 1.6)
+        c.lineTo(castleX + dx + w / 2 + 1.5, ridge - h)
+        c.fill()
+      }
+
+      range(4, horizon + 8, 95, 90, {
+        top: '#8a4f9e',
+        low: '#b03a86',
+        shade: 'rgba(78,26,114,0.45)',
+        rim: '#ff8a3d',
+        streak: 'rgba(78,26,114,0.6)',
+      })
+      const near = range(6, LAVA_Y + 6, 68, 70, {
+        top: '#3b0f5c',
+        low: '#1a0629',
+        shade: 'rgba(13,2,33,0.5)',
+        rim: '#ff6f5a',
+        streak: 'rgba(106,42,134,0.8)',
+      })
+
+      // lavafalls pour from two clefts in the near range (drawn each frame, so just remember where)
+      const clefts = near.filter((_, j) => j % 2 === 1).filter(([x]) => x > W * 0.12 && x < W * 0.88 && Math.abs(x - W / 2) > W * 0.08)
+      falls = [clefts[1], clefts[clefts.length - 2]].filter(Boolean).map(([x, y]) => ({ x, top: y }))
+
+      // dark spires rising from the lava at both edges, lit from below
+      for (const side of [0, 1]) {
+        const flip = (x: number) => (side ? W - x : x)
+        const pts: [number, number][] = [
+          [-4, LAVA_Y + 10],
+          [-4, LAVA_Y - 150],
+          [10, LAVA_Y - 168],
+          [22, LAVA_Y - 120],
+          [30, LAVA_Y - 128],
+          [42, LAVA_Y - 60],
+          [52, LAVA_Y + 10],
+        ]
+        c.fillStyle = linear(c, LAVA_Y - 170, LAVA_Y, [
+          [0, '#2b0a4a'],
+          [0.7, '#1a0629'],
+          [1, '#6d0a2e'],
+        ])
+        c.beginPath()
+        pts.forEach(([x, y], j) => (j ? c.lineTo(flip(x), y) : c.moveTo(flip(x), y)))
+        c.closePath()
+        c.fill()
+        c.strokeStyle = '#ff6f5a'
+        c.lineWidth = 1.4 / k
+        c.beginPath()
+        c.moveTo(flip(30), LAVA_Y - 128)
+        c.lineTo(flip(42), LAVA_Y - 60)
+        c.lineTo(flip(52), LAVA_Y + 10)
+        c.stroke()
+        // crystals growing from the tips
+        c.fillStyle = '#29f0ff'
+        for (const [x, y, h] of [
+          [10, LAVA_Y - 168, 16],
+          [30, LAVA_Y - 128, 11],
+        ]) {
+          c.beginPath()
+          c.moveTo(flip(x - 3), y + 2)
+          c.lineTo(flip(x), y - h)
+          c.lineTo(flip(x + 3), y + 2)
+          c.fill()
+        }
+      }
+
+      c.setTransform(1, 0, 0, 1, 0, 0)
+      quantize(backdrop, 40, false)
+
+      // single-pixel details added after pixelating, so they stay crisp
+      const img = c.getImageData(0, 0, LW, LH)
+      const dark = (x: number, y: number) => {
+        const i = (y * LW + x) * 4
+        return img.data[i] + img.data[i + 1] + img.data[i + 2] < 260
+      }
+      // a dust of faint background stars, only where the sky is dark
+      for (let s = 0; s < LW * LH * 0.004; s++) {
+        const x = Math.floor(rand() * LW)
+        const y = Math.floor(rand() * LH * 0.5)
+        if (!dark(x, y)) continue
+        c.fillStyle = rand() < 0.25 ? '#a98cf0' : '#6a2a86'
+        c.fillRect(x, y, 1, 1)
+      }
+      // lit windows in the castle towers
+      c.fillStyle = '#ffe08a'
+      for (const [dx, h] of towers) {
+        for (let wy = 0; wy < 2; wy++) c.fillRect(X(castleX + dx), X(ridge - h + 6 + wy * 10), 1, 1)
+      }
+      c.fillRect(X(castleX - 10), X(ridge - 7), 1, 1)
+      c.fillRect(X(castleX + 9), X(ridge - 7), 1, 1)
+    }
+
+    // ---- floating islands, painted as their own layer so the clouds can drift behind them ----
+    const paintIslands = () => {
+      const c = islands.getContext('2d')
+      if (!c) return
+      c.clearRect(0, 0, LW, LH)
+      c.setTransform(k, 0, 0, k, 0, 0)
+      for (const p of platforms) {
+        const r = seeded(Math.round(p.x * 13 + p.y))
+        const depth = 34
+        // the rock outline: a jagged wedge hanging below the top
+        const rock: [number, number][] = [[p.x - 2, p.y + 6]]
         const n = p.rocks.length
         for (let i = 0; i < n; i++) {
           const fx = (i + 0.5) / n
           const centre = 1 - Math.abs(fx - 0.5) * 2
-          c.lineTo(p.x + fx * p.w, p.y + 8 + (depth - 8) * centre * (0.5 + p.rocks[i] * 0.5))
+          rock.push([p.x + fx * p.w, p.y + 9 + (depth - 9) * centre * (0.45 + p.rocks[i] * 0.55)])
         }
-        c.lineTo(p.x + p.w + 2, p.y + 6)
+        rock.push([p.x + p.w + 2, p.y + 6])
+        c.save()
+        c.beginPath()
+        rock.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
         c.closePath()
+        c.fillStyle = linear(c, p.y, p.y + depth, [
+          [0, '#8a4f9e'],
+          [0.5, '#5a2a7a'],
+          [1, '#2b0a4a'],
+        ])
         c.fill()
-        const top = c.createLinearGradient(0, p.y, 0, p.y + 10)
-        top.addColorStop(0, '#ffffff')
-        top.addColorStop(0.35, '#d7c4ff')
-        top.addColorStop(1, '#7a52b8')
-        c.fillStyle = top
-        c.fillRect(p.x - 3, p.y, p.w + 6, 10)
+        c.clip()
+        // layered strata and cracks
+        for (let y = p.y + 10, band = 0; y < p.y + depth; y += 5, band++) {
+          c.fillStyle = band % 2 ? 'rgba(26,6,41,0.35)' : 'rgba(255,157,226,0.12)'
+          c.fillRect(p.x - 4, y, p.w + 8, 2.4)
+        }
+        c.strokeStyle = 'rgba(26,6,41,0.7)'
+        c.lineWidth = 1 / k
+        for (let i = 0; i < 4; i++) {
+          const x = p.x + r() * p.w
+          c.beginPath()
+          c.moveTo(x, p.y + 8)
+          c.lineTo(x + (r() - 0.5) * 10, p.y + 16 + r() * 10)
+          c.stroke()
+        }
+        // sunset light catching the side facing the sun
+        c.fillStyle = 'rgba(255,138,61,0.35)'
+        const lit = p.x + p.w / 2 < W / 2 ? p.x + p.w * 0.6 : p.x
+        c.fillRect(lit, p.y + 6, p.w * 0.4, depth)
+        c.restore()
+        // glowing roots trailing down
+        c.lineWidth = 1.2 / k
+        for (let i = 0; i < 4; i++) {
+          const rx = p.x + p.w * (0.15 + r() * 0.7)
+          const fx = (rx - p.x) / p.w
+          const bottom = p.y + 9 + (depth - 9) * (1 - Math.abs(fx - 0.5) * 2) * 0.5
+          const len = 10 + r() * 16
+          c.strokeStyle = '#1f6a8a'
+          c.beginPath()
+          c.moveTo(rx, bottom)
+          c.quadraticCurveTo(rx + (r() - 0.5) * 8, bottom + len * 0.5, rx + (r() - 0.5) * 6, bottom + len)
+          c.stroke()
+          c.fillStyle = '#29f0ff'
+          c.fillRect(rx - 1, bottom + len - 1, 2.2 / k, 2.2 / k)
+        }
+        // the polished top, with seams on its front face
+        c.fillStyle = linear(c, p.y, p.y + 10, [
+          [0, '#ffffff'],
+          [0.3, '#d7c4ff'],
+          [0.7, '#a98cf0'],
+          [1, '#7a52b8'],
+        ])
+        c.beginPath()
+        c.roundRect(p.x - 3, p.y, p.w + 6, 10, 3)
+        c.fill()
+        c.strokeStyle = '#7a52b8'
+        c.lineWidth = 1 / k
+        for (let x = p.x + 10 + r() * 6; x < p.x + p.w - 4; x += 14 + r() * 8) {
+          c.beginPath()
+          c.moveTo(x, p.y + 4)
+          c.lineTo(x, p.y + 10)
+          c.stroke()
+        }
+        // a cluster of crystals standing on one end
+        const cx = p.x + (p.x + p.w / 2 < W / 2 ? p.w - 12 : 10)
+        for (const [dx, h, col] of [
+          [-4, 9, '#1fb8e0'],
+          [0, 14, '#29f0ff'],
+          [4, 7, '#c9fff6'],
+        ] as [number, number, string][]) {
+          c.fillStyle = col
+          c.beginPath()
+          c.moveTo(cx + dx - 2.4, p.y + 1)
+          c.lineTo(cx + dx, p.y - h)
+          c.lineTo(cx + dx + 2.4, p.y + 1)
+          c.fill()
+        }
       }
-
       c.setTransform(1, 0, 0, 1, 0, 0)
-      quantize(backdrop, 44, false)
-      // the dark outline along the top edge of each island, after pixelating so it stays one pixel thick
+      quantize(islands, 14, true)
+      // a bright pixel line along each top edge
       c.fillStyle = '#ffffff'
-      for (const p of platforms) c.fillRect(X(p.x - 3) + 1, X(p.y), X(p.w + 6) - 2, 1)
+      for (const p of platforms) c.fillRect(X(p.x - 1), X(p.y) + 1, X(p.w + 2), 1)
+    }
+
+    // ---- drifting clouds lit from below by the sunset ----
+    const makeClouds = () => {
+      const horizon = LAVA_Y - 40
+      const r = seeded(23)
+      clouds = Array.from({ length: Math.max(4, Math.round(W / 130)) }, () => {
+        const w = 70 + r() * 90
+        const h = 16 + r() * 10
+        const cv = document.createElement('canvas')
+        cv.width = Math.ceil((w + 10) * k)
+        cv.height = Math.ceil((h + 10) * k)
+        const c = cv.getContext('2d')
+        if (c) {
+          c.setTransform(k, 0, 0, k, 5 * k, 5 * k)
+          c.fillStyle = linear(c, 0, h, [
+            [0, '#6a2a86'],
+            [0.45, '#b03a86'],
+            [0.75, '#ff6f5a'],
+            [1, '#ffc65c'],
+          ])
+          c.beginPath()
+          const puffs = 4 + Math.floor(r() * 3)
+          for (let i = 0; i < puffs; i++) {
+            const fx = (i + 0.5) / puffs
+            const pr = h * (0.35 + (1 - Math.abs(fx - 0.5) * 2) * 0.35 + r() * 0.1)
+            c.moveTo(fx * w + pr, h - pr * 0.9)
+            c.arc(fx * w, h - pr * 0.9, pr, 0, Math.PI * 2)
+          }
+          c.rect(w * 0.08, h * 0.55, w * 0.84, h * 0.45)
+          c.fill()
+        }
+        quantize(cv, 26, false)
+        return { img: cv, x: r() * W, y: H * 0.2 + r() * Math.max(10, horizon - 190 - H * 0.2), speed: 0.04 + r() * 0.06, w: w + 10 }
+      })
     }
 
     // Sprites are drawn as shapes into a small canvas at buffer resolution, then pixelated with an outline.
@@ -461,9 +1012,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const sc = k * SPRITE_SCALE
       const cv = document.createElement('canvas')
       cv.width = Math.ceil(100 * sc) + 2
-      cv.height = Math.ceil(80 * sc) + 2
+      cv.height = Math.ceil(84 * sc) + 2
       const ox = Math.round(52 * sc) + 1
-      const oy = Math.round(46 * sc) + 1
+      const oy = Math.round(50 * sc) + 1
       const c = cv.getContext('2d')
       if (c) {
         c.setTransform(sc, 0, 0, sc, ox, oy)
@@ -547,7 +1098,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       const cw = Math.max(1, rect.width)
       const ch = Math.max(1, rect.height)
       const wide = cw >= ch
-      pixel = Math.max(2, Math.round(wide ? ch / 240 : cw / 256))
+      pixel = Math.max(2, Math.round(wide ? ch / 290 : cw / 200))
       LW = Math.ceil(cw / pixel)
       LH = Math.ceil(ch / pixel)
       if (wide) {
@@ -573,12 +1124,14 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }))
       canvas.width = LW * pixel
       canvas.height = LH * pixel
-      buffer.width = LW
-      buffer.height = LH
-      backdrop.width = LW
-      backdrop.height = LH
+      for (const cv of [buffer, backdrop, islands]) {
+        cv.width = LW
+        cv.height = LH
+      }
       labels.clear()
       paintBackdrop()
+      paintIslands()
+      makeClouds()
       heroFrames = POSES.map(([lift, gallop]) => makeFrame((c) => drawHero(c, lift, gallop)))
       foeFrames = POSES.map(([lift]) => makeFrame((c) => drawFoe(c, lift)))
     }
@@ -766,6 +1319,41 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
+    const drawClouds = () => {
+      for (const cl of clouds) {
+        cl.x += cl.speed
+        if (cl.x > W + 10) cl.x = -cl.w
+        b.drawImage(cl.img, X(cl.x), X(cl.y))
+      }
+    }
+
+    // molten rock pouring down from the clefts in the near mountains
+    const FALL_COLOURS = ['#fff6c8', '#ffe08a', '#ffa94d', '#ff8a3d', '#ff5a1f', '#ffa94d']
+    const drawFalls = () => {
+      for (const f of falls) {
+        const x0 = X(f.x) - 2
+        const top = X(f.top)
+        const bottom = X(LAVA_Y)
+        for (let y = top; y < bottom; y++) {
+          for (let dx = 0; dx < 5; dx++) {
+            const phase = (y * 2 - t + dx * 5) >> 2
+            b.fillStyle = dx === 2 ? FALL_COLOURS[((phase % 4) + 4) % 4] : FALL_COLOURS[(((phase + dx) % 6) + 6) % 6]
+            b.fillRect(x0 + dx, y, 1, 1)
+          }
+          // the fall widens a little as it drops
+          if (y > top + (bottom - top) * 0.6 && (y + (t >> 2)) % 3 === 0) {
+            b.fillStyle = '#ff5a1f'
+            b.fillRect(x0 - 1, y, 1, 1)
+            b.fillRect(x0 + 5, y, 1, 1)
+          }
+        }
+        // a splash where it meets the lake
+        b.fillStyle = (t >> 3) % 2 ? '#fff6c8' : '#ffe08a'
+        b.fillRect(x0 - 2, bottom - 1 - ((t >> 2) % 2), 1, 1)
+        b.fillRect(x0 + 6, bottom - 2 + ((t >> 2) % 2), 1, 1)
+      }
+    }
+
     // the molten lake, drawn column by column in hard bands of colour
     const LAVA_BANDS: [string, number][] = [
       ['#fff6c8', 1],
@@ -786,7 +1374,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
       // embers flickering just above the surface
       b.fillStyle = '#ff5a1f'
-      for (let x = 0; x < LW; x++) if ((x * 7 + (t >> 2)) % 11 === 0) b.fillRect(x, surfaceY[x] - 2, 1, 1)
+      for (let x = 0; x < LW; x++) if ((x * 7 + (t >> 2)) % 11 === 0) b.fillRect(x, surfaceY[x] - 2 - ((x + (t >> 3)) % 3), 1, 1)
       let depth = 0
       for (const [col, len] of LAVA_BANDS) {
         b.fillStyle = col
@@ -794,6 +1382,16 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
         // a checkerboard row where each band meets the next, the 16-bit way to blend
         if (len < 99) for (let x = (depth + (t >> 4)) & 1; x < LW; x += 2) b.fillRect(x, surfaceY[x] + depth + len, 1, 1)
         depth += len
+      }
+      // bright currents sliding along under the crust
+      b.fillStyle = '#ffa94d'
+      for (let i = 0; i < 8; i++) {
+        const cx = Math.floor(((i * 97 + t * (0.3 + (i % 3) * 0.15)) % (LW + 30)) - 15)
+        const row = 6 + (i % 4) * 3
+        for (let dx = 0; dx < 6 + (i % 3) * 3; dx++) {
+          const x = cx + dx
+          if (x >= 0 && x < LW) b.fillRect(x, surfaceY[x] + row, 1, 1)
+        }
       }
       // rising bubbles
       for (let i = 0; i < 6; i++) {
@@ -805,11 +1403,11 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       }
     }
 
-    // crystals glowing under each island
+    // the crystal under each island pulses
     const drawCrystals = () => {
       for (const p of platforms) {
         const cx = X(p.x + p.w * (0.3 + p.rocks[0] * 0.4))
-        const cy = X(p.y + 15)
+        const cy = X(p.y + 18)
         const bright = Math.sin(t * 0.07 + p.x) > 0
         if (bright) {
           b.fillStyle = '#1fb8e0'
@@ -833,8 +1431,8 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       b.drawImage(f.img, -f.ox, -f.oy)
       b.restore()
       // a glint running along the hero's sword, and a pulse on each sorcerer's orb
-      if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 24 * SPRITE_SCALE), X(r.y - 16 * SPRITE_SCALE), 2)
-      if (!hero && Math.sin(t * 0.15 + r.x) > 0.3) glint(X(r.x + r.dir * 12 * SPRITE_SCALE), X(r.y - 26 * SPRITE_SCALE), 1)
+      if (hero && Math.floor(t / 20) % 3 === 0) glint(X(r.x + r.dir * 27 * SPRITE_SCALE), X(r.y - 17 * SPRITE_SCALE), 2)
+      if (!hero && Math.sin(t * 0.15 + r.x) > 0.3) glint(X(r.x + r.dir * 12 * SPRITE_SCALE), X(r.y - 28 * SPRITE_SCALE), 1)
     }
 
     const drawSparks = () => {
@@ -882,6 +1480,9 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
       b.drawImage(backdrop, 0, 0)
       drawStars()
+      drawClouds()
+      drawFalls()
+      b.drawImage(islands, 0, 0)
       drawCrystals()
       drawLava()
       enemies.forEach((e) => drawRider(e, false))
