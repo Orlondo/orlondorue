@@ -3221,6 +3221,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
 
     const loop = () => {
       t++
+      syncTouch()
       // a few frames of freeze on a hit give it weight; everything still draws
       const frozen = freeze > 0
       if (frozen) freeze--
@@ -3362,15 +3363,37 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       keys[e.key] = false
     }
     // On touch screens: tapping anywhere flaps, and holding the left or right third also steers that way.
+    // Touch only belongs to the game while someone is playing. On the attract and game-over screens, swipes
+    // are left to the browser (so pulling down still refreshes the page) and a quick tap starts the game.
+    let tap: { x: number; y: number; at: number } | null = null
     const onPointerDown = (e: PointerEvent) => {
+      if (mode !== 'play') {
+        tap = { x: e.clientX, y: e.clientY, at: performance.now() }
+        return
+      }
       e.preventDefault()
       const rect = canvas.getBoundingClientRect()
       const fx = (e.clientX - rect.left) / rect.width
-      steer = mode === 'play' ? (fx < 1 / 3 ? -1 : fx > 2 / 3 ? 1 : 0) : 0
+      steer = fx < 1 / 3 ? -1 : fx > 2 / 3 ? 1 : 0
       action()
     }
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
       steer = 0
+      if (mode !== 'play' && tap) {
+        const moved = Math.hypot(e.clientX - tap.x, e.clientY - tap.y)
+        if (moved < 12 && performance.now() - tap.at < 500) action()
+      }
+      tap = null
+    }
+    const onPointerCancel = () => {
+      // the browser took the gesture (a scroll or a pull-to-refresh): not a tap
+      steer = 0
+      tap = null
+    }
+    // tell the browser, ahead of each touch, whether the game wants it
+    const syncTouch = () => {
+      const want = mode === 'play' ? 'none' : 'manipulation'
+      if (canvas.style.touchAction !== want) canvas.style.touchAction = want
     }
     // Keep riders on screen if the window changes shape.
     const onResize = () => {
@@ -3386,7 +3409,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     window.addEventListener('keyup', onKeyUp)
     canvas.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('pointerup', onPointerUp)
-    window.addEventListener('pointercancel', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
     window.addEventListener('resize', onResize)
 
     raf = requestAnimationFrame(loop)
@@ -3396,7 +3419,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
       window.removeEventListener('keyup', onKeyUp)
       canvas.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointerup', onPointerUp)
-      window.removeEventListener('pointercancel', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerCancel)
       window.removeEventListener('resize', onResize)
       void audio?.close()
     }
@@ -3406,7 +3429,7 @@ export default function SkyRiders({ className = 'block h-full w-full' }: { class
     <canvas
       ref={ref}
       aria-label="SkyRiders of the Velvet Sunset, a small arcade game. Press space or tap to play."
-      className={`touch-none select-none ${className}`}
+      className={`select-none ${className}`}
     />
   )
 }
